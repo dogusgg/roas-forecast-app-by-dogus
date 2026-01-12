@@ -4,9 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import pymc as pm
 
-# -------------------------------------------------
-# Page setup
-# -------------------------------------------------
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
@@ -14,15 +11,9 @@ st.caption("Bayesian log-growth · IAP / AD separation · slope-based prior")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-# -------------------------------------------------
-# Model constants (NOT UI)
-# -------------------------------------------------
-IAP_MULTIPLIER = 4.5   # slope prior strength
-AD_MULTIPLIER  = 2.5
+IAP_MULTIPLIER = 4.5
+AD_MULTIPLIER  = 2.2
 
-# -------------------------------------------------
-# Revenue parameters
-# -------------------------------------------------
 st.subheader("Revenue Parameters")
 
 fee_option = st.selectbox(
@@ -45,9 +36,6 @@ else:
 
 st.caption(f"ROAS_NET = {IAP_GROSS_TO_NET:.2f} × ROAS_IAP + ROAS_AD")
 
-# -------------------------------------------------
-# Input
-# -------------------------------------------------
 st.subheader("Input ROAS Values (Day 1–28)")
 
 days_selected = st.multiselect(
@@ -83,19 +71,17 @@ if np.any(y_iap < 0) or np.any(y_ad < 0):
     st.error("ROAS değerleri negatif olamaz.")
     st.stop()
 
-# -------------------------------------------------
-# Run button
-# -------------------------------------------------
 run_forecast = st.button("🚀 Run Bayesian Forecast")
 
-# -------------------------------------------------
-# Bayesian log-growth (cached)
-# -------------------------------------------------
 @st.cache_resource
 def bayesian_log_growth(x, y, multiplier):
     log_x = np.log(x)
 
-    roas_anchor = y[x == 28][0] if 28 in x else y[-1]
+    if 28 in x:
+    roas_anchor = y[list(x).index(28)]
+    else:
+    roas_anchor = y[-1]
+
     target_180 = roas_anchor * multiplier
 
     prior_slope = (target_180 - roas_anchor) / (np.log(180) - np.log(28))
@@ -128,9 +114,6 @@ def bayesian_log_growth(x, y, multiplier):
 
     return mean, low, high
 
-# -------------------------------------------------
-# Run model only on button click
-# -------------------------------------------------
 if not run_forecast:
     st.info("Bayesian forecast için **Run Bayesian Forecast** butonuna bas.")
     st.stop()
@@ -143,16 +126,10 @@ ad_mean, ad_low, ad_high = bayesian_log_growth(
     tuple(x), tuple(y_ad), AD_MULTIPLIER
 )
 
-# -------------------------------------------------
-# NET ROAS
-# -------------------------------------------------
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low  = IAP_GROSS_TO_NET * iap_low  + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-# -------------------------------------------------
-# Output table
-# -------------------------------------------------
 df = pd.DataFrame({
     "Day": FUTURE_DAYS,
     "ROAS_IAP": iap_mean.round(3),
@@ -165,9 +142,6 @@ df = pd.DataFrame({
 st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 st.dataframe(df, width="stretch")
 
-# -------------------------------------------------
-# Plot
-# -------------------------------------------------
 st.subheader("📈 ROAS Curves (Bayesian)")
 
 fig, ax = plt.subplots()
@@ -200,3 +174,4 @@ st.caption(
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
+
