@@ -77,13 +77,13 @@ run_forecast = st.button("🚀 Run Bayesian Forecast")
 def bayesian_log_growth(x, y, multiplier):
     log_x = np.log(x)
 
+    # SAFE anchor selection (cache + tuple compatible)
     if 28 in x:
-    roas_anchor = y[list(x).index(28)]
+        roas_anchor = y[list(x).index(28)]
     else:
         roas_anchor = y[-1]
 
     target_180 = roas_anchor * multiplier
-
     prior_slope = (target_180 - roas_anchor) / (np.log(180) - np.log(28))
 
     with pm.Model() as model:
@@ -111,6 +111,8 @@ def bayesian_log_growth(x, y, multiplier):
     mean = post.mean(axis=(0, 1))
     low  = np.percentile(post, 10, axis=(0, 1))
     high = np.percentile(post, 90, axis=(0, 1))
+
+    return mean, low, high
 
     return mean, low, high
 
@@ -174,5 +176,6 @@ st.caption(
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
+
 
 
