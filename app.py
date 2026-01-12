@@ -4,6 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import pymc as pm
 
+# -------------------------------------------------
+# Page setup
+# -------------------------------------------------
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
@@ -11,9 +14,15 @@ st.caption("Bayesian log-growth · IAP / AD separation · slope-based prior")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-IAP_MULTIPLIER = 5  
+# -------------------------------------------------
+# Model constants (NOT UI)
+# -------------------------------------------------
+IAP_MULTIPLIER = 4.5   # slope prior strength
 AD_MULTIPLIER  = 2.5
 
+# -------------------------------------------------
+# Revenue parameters
+# -------------------------------------------------
 st.subheader("Revenue Parameters")
 
 fee_option = st.selectbox(
@@ -34,10 +43,11 @@ else:
         step=0.01
     )
 
-st.caption(
-    f"ROAS_NET = {IAP_GROSS_TO_NET:.2f} × ROAS_IAP + ROAS_AD"
-)
+st.caption(f"ROAS_NET = {IAP_GROSS_TO_NET:.2f} × ROAS_IAP + ROAS_AD")
 
+# -------------------------------------------------
+# Input
+# -------------------------------------------------
 st.subheader("Input ROAS Values (Day 1–28)")
 
 days_selected = st.multiselect(
@@ -69,6 +79,19 @@ x = np.array(sorted(days_selected))
 y_iap = np.array([roas_iap[d] for d in x])
 y_ad  = np.array([roas_ad[d]  for d in x])
 
+if np.any(y_iap < 0) or np.any(y_ad < 0):
+    st.error("ROAS değerleri negatif olamaz.")
+    st.stop()
+
+# -------------------------------------------------
+# Run button
+# -------------------------------------------------
+run_forecast = st.button("🚀 Run Bayesian Forecast")
+
+# -------------------------------------------------
+# Bayesian log-growth (cached)
+# -------------------------------------------------
+@st.cache_resource
 def bayesian_log_growth(x, y, multiplier):
     log_x = np.log(x)
 
@@ -86,9 +109,10 @@ def bayesian_log_growth(x, y, multiplier):
         pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
 
         trace = pm.sample(
-            800,
-            tune=800,
+            draws=400,
+            tune=400,
             chains=2,
+            target_accept=0.9,
             progressbar=False
         )
 
@@ -104,18 +128,31 @@ def bayesian_log_growth(x, y, multiplier):
 
     return mean, low, high
 
+# -------------------------------------------------
+# Run model only on button click
+# -------------------------------------------------
+if not run_forecast:
+    st.info("Bayesian forecast için **Run Bayesian Forecast** butonuna bas.")
+    st.stop()
+
 iap_mean, iap_low, iap_high = bayesian_log_growth(
-    x, y_iap, IAP_MULTIPLIER
+    tuple(x), tuple(y_iap), IAP_MULTIPLIER
 )
 
 ad_mean, ad_low, ad_high = bayesian_log_growth(
-    x, y_ad, AD_MULTIPLIER
+    tuple(x), tuple(y_ad), AD_MULTIPLIER
 )
 
+# -------------------------------------------------
+# NET ROAS
+# -------------------------------------------------
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low  = IAP_GROSS_TO_NET * iap_low  + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
+# -------------------------------------------------
+# Output table
+# -------------------------------------------------
 df = pd.DataFrame({
     "Day": FUTURE_DAYS,
     "ROAS_IAP": iap_mean.round(3),
@@ -128,6 +165,9 @@ df = pd.DataFrame({
 st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 st.dataframe(df, width="stretch")
 
+# -------------------------------------------------
+# Plot
+# -------------------------------------------------
 st.subheader("📈 ROAS Curves (Bayesian)")
 
 fig, ax = plt.subplots()
@@ -156,8 +196,7 @@ ax.grid(True)
 st.pyplot(fig)
 
 st.caption(
-    f""" 
+    f"""
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
-
