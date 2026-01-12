@@ -21,9 +21,9 @@ mode = st.radio(
 )
 
 MODE_MULTIPLIER = {
-    "Conservative": 1.0,   # pure data
-    "Base":         2.2,   # industry-average tail
-    "Aggressive":   3.0,   # strong LiveOps / hit scenario
+    "Conservative": 1.8,   
+    "Base":         2.2,   
+    "Aggressive":   2.6,   
 }
 
 st.caption(
@@ -185,3 +185,4 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
+
