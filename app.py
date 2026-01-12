@@ -23,9 +23,9 @@ mode = st.radio(
 )
 
 MODE_MULTIPLIER = {
-    "Conservative": 1.0,
-    "Base": 1.6,
-    "Aggressive": 2.2,
+    "Conservative": 1.8,
+    "Base": 2.2,
+    "Aggressive": 2.6,
 }
 
 st.caption(
@@ -197,3 +197,4 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
+
