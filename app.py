@@ -11,8 +11,8 @@ st.caption("Bayesian log-growth · IAP / AD separation · slope-based prior")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-IAP_MULTIPLIER = 2.5  
-AD_MULTIPLIER  = 1.6
+IAP_MULTIPLIER = 5  
+AD_MULTIPLIER  = 2.5
 
 st.subheader("Revenue Parameters")
 
@@ -156,9 +156,8 @@ ax.grid(True)
 st.pyplot(fig)
 
 st.caption(
-    f"""
-    IAP multiplier (prior): {IAP_MULTIPLIER}  
-    AD multiplier (prior): {AD_MULTIPLIER}  
+    f""" 
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
+
