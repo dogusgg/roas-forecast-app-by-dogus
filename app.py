@@ -87,7 +87,7 @@ def bayesian_log_growth(x, y, multiplier):
     prior_slope = (target_180 - roas_anchor) / (np.log(180) - np.log(28))
 
     with pm.Model() as model:
-        a = pm.Normal("a", mu=prior_slope, sigma=abs(prior_slope) + 0.1)
+        a = pm.Normal("a", mu=prior_slope, sigma=abs(prior_slope) + 0.35)
         b = pm.Normal("b", mu=y[0], sigma=0.5)
         sigma = pm.HalfNormal("sigma", 0.1)
 
@@ -176,6 +176,7 @@ st.caption(
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
+
 
 
 
