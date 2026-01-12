@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-# ---------------- Page setup ----------------
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
@@ -13,7 +12,6 @@ st.caption("ROAS_IAP / ROAS_AD separation → ROAS_NET projection with Forecast 
 NET_FEE = 0.7
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-# ---------------- Forecast mode ----------------
 st.subheader("Forecast Mode")
 
 mode = st.radio(
@@ -23,20 +21,19 @@ mode = st.radio(
 )
 
 MODE_MULTIPLIER = {
-    "Conservative": 1.8,
-    "Base": 2.2,
-    "Aggressive": 2.6,
+    "Conservative": 1.0,   # pure data
+    "Base":         2.2,   # industry-average tail
+    "Aggressive":   3.0,   # strong LiveOps / hit scenario
 }
 
 st.caption(
-    f"""
-    **Conservative:** Data-only (no uplift)  
-    **Base:** Typical industry tail  
-    **Aggressive:** Strong LiveOps / monetization tail  
+    """
+    **Conservative:** Pure data (no long-term uplift)  
+    **Base:** Industry-average monetization tail  
+    **Aggressive:** Strong LiveOps / hit-level monetization  
     """
 )
 
-# ---------------- Input ----------------
 st.subheader("Input ROAS Values (Day 1–28)")
 st.caption("En az **3 gün** için ROAS_IAP ve ROAS_AD girilmelidir. 0 girilebilir.")
 
@@ -72,7 +69,6 @@ for d in sorted(days_selected):
             key=f"ad_{d}"
         )
 
-# ---------------- Validation ----------------
 x = np.array(sorted(days_selected))
 y_iap = np.array([roas_iap[d] for d in x])
 y_ad  = np.array([roas_ad[d]  for d in x])
@@ -83,7 +79,6 @@ if np.any(y_iap < 0) or np.any(y_ad < 0):
 
 n_points = len(x)
 
-# ---------------- Model helpers ----------------
 def log_model_fit(x, y):
     coef = np.polyfit(np.log(x), y, 1)
     return lambda d: coef[0] * np.log(d) + coef[1]
@@ -103,34 +98,30 @@ def anchored_saturation_fit(x, y):
     )
     return lambda d: sat_fn(d, *popt)
 
-# ---------------- Model selection ----------------
-def choose_model(x, y, component_name):
+def choose_model(x, y, component):
     if len(x) <= 5:
         return "Log Growth", log_model_fit(x, y)
     else:
-        if component_name == "AD":
+        if component == "AD":
             return "Log Growth", log_model_fit(x, y)
         else:
             return "Anchored Saturation", anchored_saturation_fit(x, y)
 
-# ---------------- Fit models ----------------
 iap_model_name, iap_predict = choose_model(x, y_iap, "IAP")
 ad_model_name,  ad_predict  = choose_model(x, y_ad,  "AD")
 
 iap_pred_raw = iap_predict(FUTURE_DAYS)
 ad_pred_raw  = ad_predict(FUTURE_DAYS)
 
-# Safety floor
+# Safety floor: future < last observed olmasın
 iap_pred_raw = np.maximum(iap_pred_raw, y_iap[-1])
 ad_pred_raw  = np.maximum(ad_pred_raw, y_ad[-1])
 
-# ---------------- NET ROAS (base) ----------------
-net_pred_base = NET_FEE * iap_pred_raw + ad_pred_raw
+iap_pred = iap_pred_raw * MODE_MULTIPLIER[mode]
+ad_pred  = ad_pred_raw  * MODE_MULTIPLIER[mode]
 
-# ---------------- Apply forecast mode ----------------
-net_pred = net_pred_base * MODE_MULTIPLIER[mode]
+net_pred = NET_FEE * iap_pred + ad_pred
 
-# ---------------- Confidence band ----------------
 base_error = 0.12
 data_penalty = max(0, (5 - n_points)) * 0.06
 horizon_penalty = np.log(FUTURE_DAYS / max(x)) * 0.05
@@ -140,11 +131,10 @@ total_error = base_error + data_penalty + horizon_penalty
 net_low  = net_pred * (1 - total_error)
 net_high = net_pred * (1 + total_error)
 
-# ---------------- Output table ----------------
 df = pd.DataFrame({
     "Day": FUTURE_DAYS,
-    "ROAS_IAP": iap_pred_raw.round(3),
-    "ROAS_AD": ad_pred_raw.round(3),
+    "ROAS_IAP": iap_pred.round(3),
+    "ROAS_AD": ad_pred.round(3),
     "ROAS_NET": net_pred.round(3),
     "NET_low": net_low.round(3),
     "NET_high": net_high.round(3),
@@ -153,7 +143,6 @@ df = pd.DataFrame({
 st.subheader("📊 Long-Term ROAS Forecast")
 st.dataframe(df, width="stretch")
 
-# ---------------- Confidence badge ----------------
 if n_points <= 4:
     st.error("⚠️ Low confidence – very limited data")
 elif n_points <= 6:
@@ -166,11 +155,10 @@ st.caption(
     **Forecast mode:** {mode}  
     **IAP model:** {iap_model_name}  
     **AD model:** {ad_model_name}  
-    **ROAS_NET = {NET_FEE} × ROAS_IAP + ROAS_AD × mode multiplier**
+    **ROAS_NET = {NET_FEE} × ROAS_IAP + ROAS_AD**  
     """
 )
 
-# ---------------- Plot ----------------
 st.subheader("📈 ROAS Curves")
 
 fig, ax = plt.subplots()
@@ -178,8 +166,8 @@ fig, ax = plt.subplots()
 ax.scatter(x, y_iap, color="blue", label="IAP Observed")
 ax.scatter(x, y_ad,  color="green", label="AD Observed")
 
-ax.plot(FUTURE_DAYS, iap_pred_raw, color="blue", linestyle="--", label="IAP Forecast")
-ax.plot(FUTURE_DAYS, ad_pred_raw,  color="green", linestyle="--", label="AD Forecast")
+ax.plot(FUTURE_DAYS, iap_pred, color="blue", linestyle="--", label="IAP Forecast")
+ax.plot(FUTURE_DAYS, ad_pred,  color="green", linestyle="--", label="AD Forecast")
 ax.plot(FUTURE_DAYS, net_pred, color="black", linewidth=2, label="NET Forecast")
 
 ax.fill_between(
@@ -197,4 +185,3 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
-
