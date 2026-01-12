@@ -7,12 +7,12 @@ import pymc as pm
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Bayesian log-growth · IAP / AD separation · slope-based prior")
+st.caption("Bayesian power-law · IAP / AD separation · slope-based prior")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-IAP_MULTIPLIER = 4.5
-AD_MULTIPLIER  = 2.2
+IAP_MULTIPLIER = 3.0 
+AD_MULTIPLIER  = 1.5
 
 st.subheader("Revenue Parameters")
 
@@ -67,32 +67,33 @@ x = np.array(sorted(days_selected))
 y_iap = np.array([roas_iap[d] for d in x])
 y_ad  = np.array([roas_ad[d]  for d in x])
 
-if np.any(y_iap < 0) or np.any(y_ad < 0):
-    st.error("ROAS değerleri negatif olamaz.")
-    st.stop()
-
 run_forecast = st.button("🚀 Run Bayesian Forecast")
 
 @st.cache_resource
-def bayesian_log_growth(x, y, multiplier):
-    log_x = np.log(x)
+def bayesian_power_law(x, y, multiplier):
+    x = np.array(x)
+    y = np.array(y)
 
-    # SAFE anchor selection (cache + tuple compatible)
+    log_x = np.log(x)
+    log_y = np.log(np.maximum(y, 1e-4))
+
+    # Anchor (prefer Day 28)
     if 28 in x:
         roas_anchor = y[list(x).index(28)]
     else:
         roas_anchor = y[-1]
 
     target_180 = roas_anchor * multiplier
-    prior_slope = (target_180 - roas_anchor) / (np.log(180) - np.log(28))
+
+    prior_alpha = np.log(target_180 / roas_anchor) / np.log(180 / x.max())
 
     with pm.Model() as model:
-        a = pm.Normal("a", mu=prior_slope, sigma=abs(prior_slope) + 0.35)
-        b = pm.Normal("b", mu=y[0], sigma=0.5)
-        sigma = pm.HalfNormal("sigma", 0.1)
+        alpha = pm.Normal("alpha", mu=prior_alpha, sigma=0.12)
+        c = pm.Normal("c", mu=np.log(roas_anchor), sigma=0.35)
+        sigma = pm.HalfNormal("sigma", 0.15)
 
-        mu = a * log_x + b
-        pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
+        mu = c + alpha * log_x
+        pm.Normal("obs", mu=mu, sigma=sigma, observed=log_y)
 
         trace = pm.sample(
             draws=400,
@@ -102,10 +103,10 @@ def bayesian_log_growth(x, y, multiplier):
             progressbar=False
         )
 
-    future_log = np.log(FUTURE_DAYS)
-    post = (
-        trace.posterior["a"].values[..., None] * future_log
-        + trace.posterior["b"].values[..., None]
+    future_log_x = np.log(FUTURE_DAYS)
+    post = np.exp(
+        trace.posterior["c"].values[..., None]
+        + trace.posterior["alpha"].values[..., None] * future_log_x
     )
 
     mean = post.mean(axis=(0, 1))
@@ -114,17 +115,15 @@ def bayesian_log_growth(x, y, multiplier):
 
     return mean, low, high
 
-    return mean, low, high
-
 if not run_forecast:
     st.info("Bayesian forecast için **Run Bayesian Forecast** butonuna bas.")
     st.stop()
 
-iap_mean, iap_low, iap_high = bayesian_log_growth(
+iap_mean, iap_low, iap_high = bayesian_power_law(
     tuple(x), tuple(y_iap), IAP_MULTIPLIER
 )
 
-ad_mean, ad_low, ad_high = bayesian_log_growth(
+ad_mean, ad_low, ad_high = bayesian_power_law(
     tuple(x), tuple(y_ad), AD_MULTIPLIER
 )
 
@@ -144,7 +143,7 @@ df = pd.DataFrame({
 st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 st.dataframe(df, width="stretch")
 
-st.subheader("📈 ROAS Curves (Bayesian)")
+st.subheader("📈 ROAS Curves (Bayesian Power-law)")
 
 fig, ax = plt.subplots()
 
@@ -173,10 +172,7 @@ st.pyplot(fig)
 
 st.caption(
     f"""
+    Model: Bayesian Power-law  
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
-
-
-
-
