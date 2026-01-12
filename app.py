@@ -80,7 +80,7 @@ def bayesian_log_growth(x, y, multiplier):
     if 28 in x:
     roas_anchor = y[list(x).index(28)]
     else:
-    roas_anchor = y[-1]
+        roas_anchor = y[-1]
 
     target_180 = roas_anchor * multiplier
 
@@ -174,4 +174,5 @@ st.caption(
     IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
     """
 )
+
 
