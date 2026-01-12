@@ -2,147 +2,142 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import pymc as pm
 
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("ROAS_IAP / ROAS_AD separation → ROAS_NET projection (log-growth based)")
+st.caption("Bayesian log-growth · IAP / AD separation · slope-based prior")
 
-NET_FEE = 0.7
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-st.subheader("Forecast Mode")
+IAP_MULTIPLIER = 2.5  
+AD_MULTIPLIER  = 1.6
 
-mode = st.radio(
-    "Projection assumption",
-    ["Conservative", "Base", "Aggressive"],
-    horizontal=True,
+st.subheader("Revenue Parameters")
+
+fee_option = st.selectbox(
+    "IAP_GROSS_TO_NET",
+    ["70%", "85%", "Custom"]
 )
 
-MODE_MULTIPLIER = {
-    "Conservative": 1.6,   
-    "Base":         2.0,  
-    "Aggressive":   2.4,  
-}
+if fee_option == "70%":
+    IAP_GROSS_TO_NET = 0.70
+elif fee_option == "85%":
+    IAP_GROSS_TO_NET = 0.85
+else:
+    IAP_GROSS_TO_NET = st.number_input(
+        "Custom IAP_GROSS_TO_NET (0–1)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.70,
+        step=0.01
+    )
 
 st.caption(
-    """
-    **Conservative:** Data + mild long-term tail  
-    **Base:** Industry-average monetization tail  
-    **Aggressive:** Strong LiveOps / hit-level monetization  
-    """
+    f"ROAS_NET = {IAP_GROSS_TO_NET:.2f} × ROAS_IAP + ROAS_AD"
 )
 
 st.subheader("Input ROAS Values (Day 1–28)")
-st.caption("En az **3 gün** için ROAS_IAP ve ROAS_AD girilmelidir. 0 girilebilir.")
 
 days_selected = st.multiselect(
     "ROAS girdiğin günler",
     options=list(range(1, 29)),
-    default=[1, 3, 7]
+    default=[1, 3, 7, 14, 28]
 )
 
 if len(days_selected) < 3:
     st.warning("En az 3 gün seçmelisin.")
     st.stop()
 
-roas_iap = {}
-roas_ad = {}
+roas_iap, roas_ad = {}, {}
 
 for d in sorted(days_selected):
-    col1, col2 = st.columns(2)
-
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         roas_iap[d] = st.number_input(
             f"ROAS_IAP Day {d}",
-            min_value=0.0,
-            step=0.01,
-            key=f"iap_{d}"
+            min_value=0.0, step=0.01, key=f"iap_{d}"
         )
-
-    with col2:
+    with c2:
         roas_ad[d] = st.number_input(
             f"ROAS_AD Day {d}",
-            min_value=0.0,
-            step=0.01,
-            key=f"ad_{d}"
+            min_value=0.0, step=0.01, key=f"ad_{d}"
         )
 
 x = np.array(sorted(days_selected))
 y_iap = np.array([roas_iap[d] for d in x])
 y_ad  = np.array([roas_ad[d]  for d in x])
 
-if np.any(y_iap < 0) or np.any(y_ad < 0):
-    st.error("ROAS değerleri negatif olamaz.")
-    st.stop()
+def bayesian_log_growth(x, y, multiplier):
+    log_x = np.log(x)
 
-n_points = len(x)
+    roas_anchor = y[x == 28][0] if 28 in x else y[-1]
+    target_180 = roas_anchor * multiplier
 
-def log_model_fit(x, y):
-    coef = np.polyfit(np.log(x), y, 1)
-    return lambda d: coef[0] * np.log(d) + coef[1]
+    prior_slope = (target_180 - roas_anchor) / (np.log(180) - np.log(28))
 
-iap_predict = log_model_fit(x, y_iap)
-ad_predict  = log_model_fit(x, y_ad)
+    with pm.Model() as model:
+        a = pm.Normal("a", mu=prior_slope, sigma=abs(prior_slope) + 0.1)
+        b = pm.Normal("b", mu=y[0], sigma=0.5)
+        sigma = pm.HalfNormal("sigma", 0.1)
 
-iap_pred_raw = iap_predict(FUTURE_DAYS)
-ad_pred_raw  = ad_predict(FUTURE_DAYS)
+        mu = a * log_x + b
+        pm.Normal("obs", mu=mu, sigma=sigma, observed=y)
 
-# Negatifleri engelle (başka cap YOK)
-iap_pred_raw = np.maximum(iap_pred_raw, 0)
-ad_pred_raw  = np.maximum(ad_pred_raw, 0)
+        trace = pm.sample(
+            800,
+            tune=800,
+            chains=2,
+            progressbar=False
+        )
 
-iap_pred = iap_pred_raw * MODE_MULTIPLIER[mode]
-ad_pred  = ad_pred_raw  * MODE_MULTIPLIER[mode]
+    future_log = np.log(FUTURE_DAYS)
+    post = (
+        trace.posterior["a"].values[..., None] * future_log
+        + trace.posterior["b"].values[..., None]
+    )
 
-net_pred = NET_FEE * iap_pred + ad_pred
+    mean = post.mean(axis=(0, 1))
+    low  = np.percentile(post, 10, axis=(0, 1))
+    high = np.percentile(post, 90, axis=(0, 1))
 
-base_error = 0.12
-data_penalty = max(0, (5 - n_points)) * 0.06
-horizon_penalty = np.log(FUTURE_DAYS / max(x)) * 0.05
+    return mean, low, high
 
-total_error = base_error + data_penalty + horizon_penalty
+iap_mean, iap_low, iap_high = bayesian_log_growth(
+    x, y_iap, IAP_MULTIPLIER
+)
 
-net_low  = net_pred * (1 - total_error)
-net_high = net_pred * (1 + total_error)
+ad_mean, ad_low, ad_high = bayesian_log_growth(
+    x, y_ad, AD_MULTIPLIER
+)
+
+net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
+net_low  = IAP_GROSS_TO_NET * iap_low  + ad_low
+net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
 df = pd.DataFrame({
     "Day": FUTURE_DAYS,
-    "ROAS_IAP": iap_pred.round(3),
-    "ROAS_AD": ad_pred.round(3),
-    "ROAS_NET": net_pred.round(3),
+    "ROAS_IAP": iap_mean.round(3),
+    "ROAS_AD": ad_mean.round(3),
+    "ROAS_NET": net_mean.round(3),
     "NET_low": net_low.round(3),
     "NET_high": net_high.round(3),
 })
 
-st.subheader("📊 Long-Term ROAS Forecast")
+st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 st.dataframe(df, width="stretch")
 
-if n_points <= 4:
-    st.error("⚠️ Low confidence – very limited data")
-elif n_points <= 6:
-    st.warning("⚠️ Medium confidence")
-else:
-    st.success("✅ High confidence")
-
-st.caption(
-    f"""
-    **Forecast mode:** {mode}  
-    **Model:** Log-growth (IAP + AD)  
-    **ROAS_NET = {NET_FEE} × ROAS_IAP + ROAS_AD**
-    """
-)
-
-st.subheader("📈 ROAS Curves")
+st.subheader("📈 ROAS Curves (Bayesian)")
 
 fig, ax = plt.subplots()
 
 ax.scatter(x, y_iap, color="blue", label="IAP Observed")
 ax.scatter(x, y_ad,  color="green", label="AD Observed")
 
-ax.plot(FUTURE_DAYS, iap_pred, color="blue", linestyle="--", label="IAP Forecast")
-ax.plot(FUTURE_DAYS, ad_pred,  color="green", linestyle="--", label="AD Forecast")
-ax.plot(FUTURE_DAYS, net_pred, color="black", linewidth=2, label="NET Forecast")
+ax.plot(FUTURE_DAYS, iap_mean, "--", color="blue", label="IAP Mean")
+ax.plot(FUTURE_DAYS, ad_mean,  "--", color="green", label="AD Mean")
+ax.plot(FUTURE_DAYS, net_mean, color="black", linewidth=2, label="NET Mean")
 
 ax.fill_between(
     FUTURE_DAYS,
@@ -150,7 +145,7 @@ ax.fill_between(
     net_high,
     color="gray",
     alpha=0.3,
-    label="NET Confidence Band"
+    label="NET 10–90%"
 )
 
 ax.set_xlabel("Day")
@@ -159,3 +154,11 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
+
+st.caption(
+    f"""
+    IAP multiplier (prior): {IAP_MULTIPLIER}  
+    AD multiplier (prior): {AD_MULTIPLIER}  
+    IAP_GROSS_TO_NET: {IAP_GROSS_TO_NET:.2f}
+    """
+)
