@@ -2,12 +2,11 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("ROAS_IAP / ROAS_AD separation → ROAS_NET projection with Forecast Mode")
+st.caption("ROAS_IAP / ROAS_AD separation → ROAS_NET projection (log-growth based)")
 
 NET_FEE = 0.7
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
@@ -21,14 +20,14 @@ mode = st.radio(
 )
 
 MODE_MULTIPLIER = {
-    "Conservative": 1.8,   
-    "Base":         2.2,   
-    "Aggressive":   2.6,   
+    "Conservative": 1.6,   
+    "Base":         2.0,  
+    "Aggressive":   2.4,  
 }
 
 st.caption(
     """
-    **Conservative:** Pure data (no long-term uplift)  
+    **Conservative:** Data + mild long-term tail  
     **Base:** Industry-average monetization tail  
     **Aggressive:** Strong LiveOps / hit-level monetization  
     """
@@ -83,39 +82,15 @@ def log_model_fit(x, y):
     coef = np.polyfit(np.log(x), y, 1)
     return lambda d: coef[0] * np.log(d) + coef[1]
 
-def anchored_saturation_fit(x, y):
-    base = max(y)
-
-    def sat_fn(d, a, b):
-        return base + a * (1 - np.exp(-b * d))
-
-    popt, _ = curve_fit(
-        sat_fn,
-        x,
-        y,
-        bounds=([0, 0], [base * 6, 1]),
-        maxfev=10000
-    )
-    return lambda d: sat_fn(d, *popt)
-
-def choose_model(x, y, component):
-    if len(x) <= 5:
-        return "Log Growth", log_model_fit(x, y)
-    else:
-        if component == "AD":
-            return "Log Growth", log_model_fit(x, y)
-        else:
-            return "Anchored Saturation", anchored_saturation_fit(x, y)
-
-iap_model_name, iap_predict = choose_model(x, y_iap, "IAP")
-ad_model_name,  ad_predict  = choose_model(x, y_ad,  "AD")
+iap_predict = log_model_fit(x, y_iap)
+ad_predict  = log_model_fit(x, y_ad)
 
 iap_pred_raw = iap_predict(FUTURE_DAYS)
 ad_pred_raw  = ad_predict(FUTURE_DAYS)
 
-# Safety floor: future < last observed olmasın
-iap_pred_raw = np.maximum(iap_pred_raw, y_iap[-1])
-ad_pred_raw  = np.maximum(ad_pred_raw, y_ad[-1])
+# Negatifleri engelle (başka cap YOK)
+iap_pred_raw = np.maximum(iap_pred_raw, 0)
+ad_pred_raw  = np.maximum(ad_pred_raw, 0)
 
 iap_pred = iap_pred_raw * MODE_MULTIPLIER[mode]
 ad_pred  = ad_pred_raw  * MODE_MULTIPLIER[mode]
@@ -153,9 +128,8 @@ else:
 st.caption(
     f"""
     **Forecast mode:** {mode}  
-    **IAP model:** {iap_model_name}  
-    **AD model:** {ad_model_name}  
-    **ROAS_NET = {NET_FEE} × ROAS_IAP + ROAS_AD**  
+    **Model:** Log-growth (IAP + AD)  
+    **ROAS_NET = {NET_FEE} × ROAS_IAP + ROAS_AD**
     """
 )
 
@@ -185,4 +159,3 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
-
