@@ -118,7 +118,7 @@ def bayesian_power_law(x, y, multiplier):
     )
 
 if not run_enabled:
-    st.info("Forecast çalıştırmak için IAP veya AD’den en az biri ≥3 pozitif ROAS içermelidir.")
+    st.info("Forecast çalıştırmak için IAP veya AD’den birine yada her ikisine en az 3 pozitif ROAS degeri girilmelidir.")
     st.stop()
 
 run_forecast = st.button("🚀 Run Bayesian Forecast")
@@ -169,3 +169,4 @@ ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
+
