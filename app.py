@@ -12,8 +12,8 @@ st.caption("Bayesian power-law · IAP / AD separation")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
-IAP_MULTIPLIER = 3.0
-AD_MULTIPLIER = 1.5
+IAP_MULTIPLIER = 2.8
+AD_MULTIPLIER = 1.4
 
 st.subheader("Revenue Parameters")
 
@@ -152,8 +152,17 @@ df = pd.DataFrame({
     "NET_high": net_high.round(3),
 })
 
-st.subheader("📊 Bayesian Long-Term ROAS Forecast")
-st.dataframe(df, width="stretch")
+def highlight_360(row):
+    return ['background-color: #fff3cd' if row.Day == 360 else '' for _ in row]
+
+styled_df = (
+    df.style
+    .format("{:.2f}")
+    .set_properties(**{'text-align': 'center'})
+    .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
+    .highlight_max(subset=["ROAS_NET"], color="#e8f5e9")
+    .apply(highlight_360, axis=1)
+)
 
 st.subheader("📈 ROAS Curves")
 
@@ -251,5 +260,6 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
