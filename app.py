@@ -34,10 +34,12 @@ else:
 
 st.subheader("Input ROAS Values (Day 1–28)")
 
+options = list(range(1, 29)) + [45, 60]
+
 days_selected = st.multiselect(
     "ROAS girdiğin günler",
-    options = list(range(1, 29)) + [45, 60]
-    default=[1, 3, 7, 14, 28]
+    options=options,
+    default=[1,3,7,14,28]
 )
 
 if len(days_selected) < 3:
@@ -249,4 +251,5 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
