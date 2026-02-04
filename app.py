@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import pymc as pm
 
@@ -84,10 +83,8 @@ def bayesian_power_law(x, y, multiplier):
     log_x = np.log(x)
     log_y = np.log(y)
 
-    if 28 in x:
-        anchor = y[list(x).index(28)]
-    else:
-        anchor = y[-1]
+    anchor_day = max(x)
+    anchor = y[list(x).index(anchor_day)]
 
     target_180 = anchor * multiplier
     alpha_prior = np.log(target_180 / anchor) / np.log(180 / x.max())
@@ -162,7 +159,11 @@ styled_df = (
     .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
     .highlight_max(subset=["ROAS_NET"], color="#e8f5e9")
     .apply(highlight_360, axis=1)
+    .set_properties(subset=["ROAS_NET"], **{'font-weight': 'bold'})
 )
+
+st.subheader("📊 Bayesian Long-Term ROAS Forecast")
+st.table(styled_df)
 
 st.subheader("📈 ROAS Curves")
 
@@ -260,6 +261,7 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
