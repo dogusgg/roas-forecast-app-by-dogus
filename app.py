@@ -152,6 +152,7 @@ df = pd.DataFrame({
 def highlight_360(row):
     return ['background-color: #fff3cd' if row.Day == 360 else '' for _ in row]
 
+st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 st.dataframe(
     df.round(2),
     hide_index=True,
@@ -159,7 +160,6 @@ st.dataframe(
 )
 
 st.subheader("📈 ROAS Curves")
-
 fig = go.Figure()
 
 # Confidence band
@@ -254,4 +254,5 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
