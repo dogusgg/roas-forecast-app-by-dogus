@@ -153,7 +153,8 @@ def highlight_360(row):
     return ['background-color: #fff3cd' if row.Day == 360 else '' for _ in row]
 
 styled_df = (
-    df.style
+    df.reset_index(drop=True)
+    .style
     .format("{:.2f}")
     .set_properties(**{'text-align': 'center'})
     .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
@@ -261,6 +262,7 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
