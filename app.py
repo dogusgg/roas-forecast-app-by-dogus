@@ -152,20 +152,11 @@ df = pd.DataFrame({
 def highlight_360(row):
     return ['background-color: #fff3cd' if row.Day == 360 else '' for _ in row]
 
-df = df.reset_index(drop=True)
-
-styled_df = (
-    df.style
-    .format("{:.2f}")
-    .set_properties(**{'text-align': 'center'})
-    .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
-    .highlight_max(subset=["ROAS_NET"], color="#e8f5e9")
-    .apply(highlight_360, axis=1)
-    .set_properties(subset=["ROAS_NET"], **{'font-weight': 'bold'})
+st.dataframe(
+    df.round(2),
+    hide_index=True,
+    use_container_width=True
 )
-
-st.subheader("📊 Bayesian Long-Term ROAS Forecast")
-st.table(styled_df)
 
 st.subheader("📈 ROAS Curves")
 
@@ -263,14 +254,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
-
-
-
-
-
-
-
-
-
 
