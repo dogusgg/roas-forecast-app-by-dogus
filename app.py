@@ -154,23 +154,22 @@ def highlight_360(row):
 
 st.subheader("📊 Bayesian Long-Term ROAS Forecast")
 
-html_table = df.round(2).to_html(index=False)
-
-st.markdown(
-    f"""
-    <style>
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-        }}
-        th, td {{
-            text-align: center !important;
-            padding: 8px;
-        }}
-    </style>
-    {html_table}
-    """,
-    unsafe_allow_html=True
+st.dataframe(
+    df.round(2),
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "Day": st.column_config.NumberColumn(
+            "Day",
+            format="%d",
+            help="Forecast horizon"
+        ),
+        "ROAS_IAP": st.column_config.NumberColumn(format="%.2f"),
+        "ROAS_AD": st.column_config.NumberColumn(format="%.2f"),
+        "ROAS_NET": st.column_config.NumberColumn(format="%.2f"),
+        "NET_low": st.column_config.NumberColumn("NET Low", format="%.2f"),
+        "NET_high": st.column_config.NumberColumn("NET High", format="%.2f"),
+    }
 )
 
 st.subheader("📈 ROAS Curves")
@@ -269,6 +268,7 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
