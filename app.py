@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import pymc as pm
 
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
@@ -154,19 +155,102 @@ st.dataframe(df, width="stretch")
 
 st.subheader("📈 ROAS Curves")
 
-fig, ax = plt.subplots()
+fig = go.Figure()
 
-ax.scatter(x, y_iap, color="blue", label="IAP Observed")
-ax.scatter(x, y_ad, color="green", label="AD Observed")
+# Confidence band
+fig.add_trace(
+    go.Scatter(
+        x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]),
+        y=np.concatenate([net_high, net_low[::-1]]),
+        fill="toself",
+        fillcolor="rgba(128,128,128,0.25)",
+        line=dict(color="rgba(255,255,255,0)"),
+        hoverinfo="skip",
+        showlegend=True,
+        name="NET Confidence"
+    )
+)
 
-ax.plot(FUTURE_DAYS, iap_mean, "--", color="blue", label="IAP Forecast")
-ax.plot(FUTURE_DAYS, ad_mean, "--", color="green", label="AD Forecast")
-ax.plot(FUTURE_DAYS, net_mean, color="black", linewidth=2, label="NET Forecast")
+# NET
+fig.add_trace(
+    go.Scatter(
+        x=FUTURE_DAYS,
+        y=net_mean,
+        mode="lines",
+        line=dict(width=4),
+        name="NET",
+        hovertemplate=
+        "<b>Day %{x}</b><br>" +
+        "NET ROAS: %{y:.3f}<extra></extra>"
+    )
+)
 
-ax.fill_between(FUTURE_DAYS, net_low, net_high, color="gray", alpha=0.3)
+# IAP
+fig.add_trace(
+    go.Scatter(
+        x=FUTURE_DAYS,
+        y=iap_mean,
+        mode="lines",
+        line=dict(dash="dash"),
+        name="IAP",
+        hovertemplate=
+        "<b>Day %{x}</b><br>" +
+        "IAP ROAS: %{y:.3f}<extra></extra>"
+    )
+)
 
-ax.legend()
-ax.grid(True)
+# AD
+fig.add_trace(
+    go.Scatter(
+        x=FUTURE_DAYS,
+        y=ad_mean,
+        mode="lines",
+        line=dict(dash="dot"),
+        name="AD",
+        hovertemplate=
+        "<b>Day %{x}</b><br>" +
+        "AD ROAS: %{y:.3f}<extra></extra>"
+    )
+)
+
+# Observed points
+fig.add_trace(
+    go.Scatter(
+        x=x,
+        y=y_iap,
+        mode="markers",
+        marker=dict(size=8),
+        name="IAP Observed",
+        hovertemplate=
+        "<b>Observed Day %{x}</b><br>" +
+        "IAP: %{y:.3f}<extra></extra>"
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x=x,
+        y=y_ad,
+        mode="markers",
+        marker=dict(size=8),
+        name="AD Observed",
+        hovertemplate=
+        "<b>Observed Day %{x}</b><br>" +
+        "AD: %{y:.3f}<extra></extra>"
+    )
+)
+
+fig.update_layout(
+    height=520,
+    hovermode="x unified",
+    template="plotly_white",
+    legend=dict(orientation="h"),
+    margin=dict(l=10, r=10, t=40, b=10),
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
 
 st.pyplot(fig)
+
 
