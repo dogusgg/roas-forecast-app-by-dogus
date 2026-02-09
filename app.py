@@ -191,32 +191,34 @@ fig.add_trace(
 )
 
 # IAP
-fig.add_trace(
-    go.Scatter(
-        x=FUTURE_DAYS,
-        y=iap_mean,
-        mode="lines",
-        line=dict(dash="dash"),
-        name="IAP",
-        hovertemplate=
-        "<b>Day %{x}</b><br>" +
-        "IAP ROAS: %{y:.3f}<extra></extra>"
+if iap_pos >= 3:
+    fig.add_trace(
+        go.Scatter(
+            x=FUTURE_DAYS,
+            y=iap_mean,
+            mode="lines",
+            line=dict(dash="dash"),
+            name="IAP",
+            hovertemplate=
+            "<b>Day %{x}</b><br>" +
+            "IAP ROAS: %{y:.3f}<extra></extra>"
+        )
     )
-)
 
 # AD
-fig.add_trace(
-    go.Scatter(
-        x=FUTURE_DAYS,
-        y=ad_mean,
-        mode="lines",
-        line=dict(dash="dot"),
-        name="AD",
-        hovertemplate=
-        "<b>Day %{x}</b><br>" +
-        "AD ROAS: %{y:.3f}<extra></extra>"
+if ad_pos >= 3:    
+    fig.add_trace(
+        go.Scatter(
+            x=FUTURE_DAYS,
+            y=ad_mean,
+            mode="lines",
+            line=dict(dash="dot"),
+            name="AD",
+            hovertemplate=
+            "<b>Day %{x}</b><br>" +
+            "AD ROAS: %{y:.3f}<extra></extra>"
+        )
     )
-)
 
 # Observed points
 if iap_pos >= 3:
@@ -256,6 +258,7 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
