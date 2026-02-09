@@ -18,7 +18,7 @@ FUTURE_DAYS = np.array([90,120,180,360,720])
 
 st.subheader("Revenue Parameters")
 
-fee_option = st.selectbox("IAP_GROSS_TO_NET",ر", ["70%", "85%", "Custom"])
+fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%", "85%", "Custom"])
 
 if fee_option == "70%":
     IAP_GROSS_TO_NET = 0.70
@@ -146,7 +146,7 @@ def bayesian_power(x,y,ret_alpha):
     roas_alpha = np.polyfit(log_x,log_y,1)[0]
 
     if ret_alpha is not None:
-        alpha_prior = 0.55*roas_alpha + 0.45*roas_alpha
+        alpha_prior = 0.55*roas_alpha + 0.45*ret_alpha
     else:
         alpha_prior = roas_alpha
 
@@ -285,3 +285,4 @@ if st.button("🚀 Run Forecast"):
     )
 
     st.plotly_chart(fig,use_container_width=True)
+
