@@ -48,7 +48,7 @@ for d in sorted(ret_days):
     ret_values[d] = st.number_input(
         f"D{d} retention %",
         0.0,100.0,
-        value=35.0 if d==1 else 12.0 if d==7 else 5.0,
+        value=40.0 if d==1 else 20.0 if d==7 else 10.0,
         step=0.1
     ) / 100
 
@@ -285,5 +285,6 @@ if st.button("🚀 Run Forecast"):
     )
 
     st.plotly_chart(fig,use_container_width=True)
+
 
 
