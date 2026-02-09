@@ -8,13 +8,14 @@ from scipy.optimize import curve_fit
 st.set_page_config(page_title="ROAS Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Bayesian power-law + Weibull retention + payback")
+st.caption("Tempered Power-Law Bayesian · Retention-driven confidence")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
-####################################################
+
+############################################################
 # REVENUE PARAM
-####################################################
+############################################################
 
 st.subheader("Revenue Parameters")
 
@@ -33,9 +34,10 @@ else:
         0.0,1.0,0.70,0.01
     )
 
-####################################################
-# RETENTION (WEIBULL)
-####################################################
+
+############################################################
+# RETENTION (ONLY FOR VARIANCE)
+############################################################
 
 st.subheader("Retention Curve")
 
@@ -59,7 +61,7 @@ for d in sorted(ret_days):
 def weibull(t, lam, k):
     return np.exp(-(t/lam)**k)
 
-retention_alpha = None
+retention_sigma = 0.10  # default wide
 
 if len(ret_days) >= 3:
     try:
@@ -69,17 +71,19 @@ if len(ret_days) >= 3:
             np.array(list(ret_values.values())),
             bounds=(0,[200,3])
         )
+
         lam,k = params
 
-        # retention decay proxy for alpha
-        retention_alpha = -k / (lam**k)
+        # smoother decay -> tighter sigma
+        retention_sigma = np.clip(0.12 - k*0.02, 0.05, 0.12)
 
     except:
-        st.warning("Retention curve fit başarısız — retention kullanılmayacak.")
+        st.warning("Retention fit failed — using wide confidence.")
 
-####################################################
+
+############################################################
 # ROAS INPUT
-####################################################
+############################################################
 
 st.subheader("ROAS Inputs")
 
@@ -112,38 +116,22 @@ ad_pos = np.sum(y_ad>0)
 
 run_enabled = (iap_pos>=3) or (ad_pos>=3)
 
-####################################################
-# BUTTON UX
-####################################################
-
 label = "🚀 Generate Forecast"
 if not run_enabled:
-    label += " (insufficient data)"
+    label += " (need ≥3 positive ROAS)"
 
 run_forecast = st.button(label, disabled=not run_enabled)
 
 if not run_enabled:
-    st.caption("Enter ≥3 positive ROAS values for at least one revenue stream.")
-
-####################################################
-# SESSION SAFETY
-####################################################
-
-if "forecast_ran" not in st.session_state:
-    st.session_state.forecast_ran = False
-
-if run_forecast:
-    st.session_state.forecast_ran = True
-
-if not st.session_state.forecast_ran:
     st.stop()
 
-####################################################
-# MODEL
-####################################################
+
+############################################################
+# TEMPERED POWER LAW MODEL
+############################################################
 
 @st.cache_resource
-def bayesian_power(x,y,ret_alpha):
+def tempered_bayes(x,y,ret_sigma):
 
     mask = y>0
     x = x[mask]
@@ -155,38 +143,32 @@ def bayesian_power(x,y,ret_alpha):
     anchor_day = max(x)
     anchor = y[list(x).index(anchor_day)]
 
-    roas_alpha = np.polyfit(log_x,log_y,1)[0]
+    slope = np.polyfit(log_x,log_y,1)[0]
 
-    if ret_alpha is not None:
-        alpha_prior = 0.6*roas_alpha + 0.4*ret_alpha
-    else:
-        alpha_prior = roas_alpha
+    # soft ceiling guess
+    ceiling_guess = anchor * 2.5
 
     with pm.Model() as model:
 
         alpha = pm.Normal(
             "alpha",
-            mu=alpha_prior,
-            sigma=0.05   # tighter confidence
+            mu=slope,
+            sigma=ret_sigma
         )
 
-        c = pm.Normal(
-            "c",
-            mu=np.log(anchor),
-            sigma=0.22
+        ceiling = pm.LogNormal(
+            "ceiling",
+            mu=np.log(ceiling_guess),
+            sigma=0.35
         )
 
-        sigma = pm.HalfNormal(
-            "sigma",
-            0.06
+        sigma = pm.HalfNormal("sigma",0.06)
+
+        mu = pm.math.log(
+            ceiling * (1 - pm.math.exp(-pm.math.exp(alpha)*log_x))
         )
 
-        mu = c + alpha*log_x
-
-        pm.Normal("obs",
-                  mu=mu,
-                  sigma=sigma,
-                  observed=log_y)
+        pm.Normal("obs",mu=mu,sigma=sigma,observed=log_y)
 
         trace = pm.sample(
             draws=250,
@@ -199,8 +181,12 @@ def bayesian_power(x,y,ret_alpha):
     future_log = np.log(FUTURE_DAYS)
 
     post = np.exp(
-        trace.posterior["c"].values[...,None]
-        + trace.posterior["alpha"].values[...,None]*future_log
+        np.log(trace.posterior["ceiling"].values[...,None])
+        + np.log(
+            1 - np.exp(
+                -np.exp(trace.posterior["alpha"].values[...,None]) * future_log
+            )
+        )
     )
 
     return (
@@ -209,121 +195,116 @@ def bayesian_power(x,y,ret_alpha):
         np.percentile(post,90,(0,1))
     )
 
-####################################################
+
+############################################################
 # RUN FORECAST
-####################################################
+############################################################
 
-streams=[]
+if run_forecast:
 
-if iap_pos>=3:
-    iap_mean,iap_low,iap_high = bayesian_power(x,y_iap,retention_alpha)
-    streams.append("IAP")
-else:
-    iap_mean = iap_low = iap_high = np.zeros(len(FUTURE_DAYS))
+    streams=[]
 
-if ad_pos>=3:
-    ad_mean,ad_low,ad_high = bayesian_power(x,y_ad,retention_alpha)
-    streams.append("AD")
-else:
-    ad_mean = ad_low = ad_high = np.zeros(len(FUTURE_DAYS))
+    if iap_pos>=3:
+        iap_mean,iap_low,iap_high = tempered_bayes(x,y_iap,retention_sigma)
+        streams.append("IAP")
+    else:
+        iap_mean = iap_low = iap_high = np.zeros(len(FUTURE_DAYS))
 
-st.caption(f"Forecast generated for: {', '.join(streams)}")
+    if ad_pos>=3:
+        ad_mean,ad_low,ad_high = tempered_bayes(x,y_ad,retention_sigma)
+        streams.append("AD")
+    else:
+        ad_mean = ad_low = ad_high = np.zeros(len(FUTURE_DAYS))
 
-####################################################
-# NET
-####################################################
+    st.caption(f"Forecast generated for: {', '.join(streams)}")
 
-net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
-net_low = IAP_GROSS_TO_NET * iap_low + ad_low
-net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-####################################################
-# PAYBACK (VERY IMPORTANT)
-####################################################
+    ########################################################
+    # NET
+    ########################################################
 
-payback_day = None
+    net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
+    net_low = IAP_GROSS_TO_NET * iap_low + ad_low
+    net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-if net_mean.max() >= 1:
-    payback_day = np.interp(
-        1,
-        net_mean,
-        FUTURE_DAYS
+
+    ########################################################
+    # TABLE
+    ########################################################
+
+    df = pd.DataFrame({
+        "Day":FUTURE_DAYS,
+        "IAP":iap_mean,
+        "AD":ad_mean,
+        "NET":net_mean,
+        "NET_low":net_low,
+        "NET_high":net_high
+    })
+
+    st.subheader("Forecast")
+
+    st.dataframe(
+        df.round(2),
+        hide_index=True,
+        use_container_width=True
     )
 
-####################################################
-# TABLE
-####################################################
 
-df = pd.DataFrame({
-    "Day":FUTURE_DAYS,
-    "IAP":iap_mean,
-    "AD":ad_mean,
-    "NET":net_mean,
-    "NET_low":net_low,
-    "NET_high":net_high
-})
+    ########################################################
+    # PAYBACK
+    ########################################################
 
-st.subheader("Forecast")
+    if net_mean.max() >= 1:
+        payback = np.interp(1,net_mean,FUTURE_DAYS)
+        st.success(f"✅ Expected Payback ≈ Day {int(payback)}")
+    else:
+        st.warning("⚠️ Payback not reached within 720 days")
 
-st.dataframe(
-    df.round(2),
-    hide_index=True,
-    use_container_width=True
-)
 
-####################################################
-# PAYBACK BADGE
-####################################################
+    ########################################################
+    # GRAPH
+    ########################################################
 
-if payback_day:
-    st.success(f"✅ Expected payback ≈ Day {int(payback_day)}")
-else:
-    st.warning("⚠️ Payback not reached within 720 days")
+    fig = go.Figure()
 
-####################################################
-# GRAPH
-####################################################
-
-fig = go.Figure()
-
-fig.add_trace(go.Scatter(
-    x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]),
-    y=np.concatenate([net_high,net_low[::-1]]),
-    fill="toself",
-    fillcolor="rgba(150,150,150,0.25)",
-    line=dict(color="rgba(0,0,0,0)"),
-    name="Confidence"
-))
-
-fig.add_trace(go.Scatter(
-    x=FUTURE_DAYS,
-    y=net_mean,
-    line=dict(width=4),
-    name="NET"
-))
-
-if iap_pos>=3:
     fig.add_trace(go.Scatter(
-        x=FUTURE_DAYS,
-        y=iap_mean,
-        line=dict(dash="dash"),
-        name="IAP"
+        x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]),
+        y=np.concatenate([net_high,net_low[::-1]]),
+        fill="toself",
+        fillcolor="rgba(150,150,150,0.25)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="Confidence"
     ))
 
-if ad_pos>=3:
     fig.add_trace(go.Scatter(
         x=FUTURE_DAYS,
-        y=ad_mean,
-        line=dict(dash="dot"),
-        name="AD"
+        y=net_mean,
+        line=dict(width=4),
+        name="NET"
     ))
 
-fig.update_layout(
-    template="plotly_white",
-    hovermode="x unified",
-    height=520
-)
+    if iap_pos>=3:
+        fig.add_trace(go.Scatter(
+            x=FUTURE_DAYS,
+            y=iap_mean,
+            line=dict(dash="dash"),
+            name="IAP"
+        ))
 
-fig.update_xaxes(type="log")  # HUGE visual improvement
+    if ad_pos>=3:
+        fig.add_trace(go.Scatter(
+            x=FUTURE_DAYS,
+            y=ad_mean,
+            line=dict(dash="dot"),
+            name="AD"
+        ))
 
-st.plotly_chart(fig,use_container_width=True)
+    fig.update_layout(
+        template="plotly_white",
+        hovermode="x unified",
+        height=520
+    )
+
+    fig.update_xaxes(type="log")
+
+    st.plotly_chart(fig,use_container_width=True)
