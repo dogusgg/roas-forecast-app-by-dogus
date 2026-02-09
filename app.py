@@ -43,8 +43,8 @@ st.subheader("Retention Curve")
 
 ret_days = st.multiselect(
     "Retention days",
-    [1,3,7,14,30,45,60],
-    default=[1,7,30]
+    [1,3,7,14,28,45,60],
+    default=[1,7,28]
 )
 
 ret_values = {}
@@ -53,7 +53,7 @@ for d in sorted(ret_days):
     ret_values[d] = st.number_input(
         f"D{d} retention %",
         0.0,100.0,
-        value=35.0 if d==1 else 12.0 if d==7 else 5.0,
+        value=40.0 if d==1 else 20.0 if d==7 else 10.0,
         step=0.1
     ) / 100
 
@@ -308,3 +308,4 @@ if run_forecast:
     fig.update_xaxes(type="log")
 
     st.plotly_chart(fig,use_container_width=True)
+
