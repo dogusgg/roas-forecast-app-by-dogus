@@ -219,31 +219,33 @@ fig.add_trace(
 )
 
 # Observed points
-fig.add_trace(
-    go.Scatter(
-        x=x,
-        y=y_iap,
-        mode="markers",
-        marker=dict(size=8),
-        name="IAP Observed",
-        hovertemplate=
-        "<b>Observed Day %{x}</b><br>" +
-        "IAP: %{y:.3f}<extra></extra>"
+if iap_pos >= 3:
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y_iap,
+            mode="markers",
+            marker=dict(size=8),
+            name="IAP Observed",
+            hovertemplate=
+            "<b>Observed Day %{x}</b><br>" +
+            "IAP: %{y:.3f}<extra></extra>"
+        )
     )
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=x,
-        y=y_ad,
-        mode="markers",
-        marker=dict(size=8),
-        name="AD Observed",
-        hovertemplate=
-        "<b>Observed Day %{x}</b><br>" +
-        "AD: %{y:.3f}<extra></extra>"
+    
+if ad_pos >= 3:
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y_ad,
+            mode="markers",
+            marker=dict(size=8),
+            name="AD Observed",
+            hovertemplate=
+            "<b>Observed Day %{x}</b><br>" +
+            "AD: %{y:.3f}<extra></extra>"
+        )
     )
-)
 
 fig.update_layout(
     height=520,
@@ -254,5 +256,6 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
