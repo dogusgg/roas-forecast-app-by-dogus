@@ -38,8 +38,8 @@ st.subheader("Retention (Curve Fit)")
 
 ret_days = st.multiselect(
     "Retention days",
-    [1,3,7,14,30,45,60],
-    default=[1,7,30]
+    [1,3,7,14,28,45,60],
+    default=[1,7,28]
 )
 
 ret_values = {}
@@ -285,4 +285,5 @@ if st.button("🚀 Run Forecast"):
     )
 
     st.plotly_chart(fig,use_container_width=True)
+
 
