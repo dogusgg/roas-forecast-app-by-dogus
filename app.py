@@ -1,34 +1,30 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 
 # Sayfa Ayarları
 st.set_page_config(page_title="ROAS Forecasting Tool", layout="wide")
 
 st.title("📈 ROAS Long-Term Forecasting Tool")
-st.markdown("""
-Early ROAS verilerini girerek 720 güne kadar projeksiyon oluşturun. 
-Model, veri miktarına göre en uygun algoritmayı (Log, Power veya Saturation) otomatik seçer.
-""")
+st.markdown("Interaktif grafik ve detaylı senaryo analizleri ile uzun vadeli ROAS projeksiyonu.")
 
 # -------------------------------------------------
-# 1. INPUT BÖLÜMÜ (Day 1–28 Esnek Giriş)
+# 1. SIDEBAR - VERİ GİRİŞİ
 # -------------------------------------------------
 st.sidebar.header("📊 Veri Girişi")
 st.sidebar.info("En az 3 adet ROAS değeri girilmelidir.")
 
 roas_dict = {}
-# 1'den 28'e kadar olan günler için input alanları
+cols = st.sidebar.columns(2)
 for day in range(1, 29):
-    # Sadece yaygın kullanılan günleri default açık gösterelim, diğerlerini gizleyelim (opsiyonel tasarım)
-    default_val = 0.0
-    val = st.sidebar.number_input(f"Day {day} ROAS", min_value=0.0, value=default_val, step=0.01, key=f"d{day}")
-    if val > 0:
-        roas_dict[day] = val
+    # Kullanıcıyı yormamak için sidebar'da düzenli gösterelim
+    with cols[day % 2]:
+        val = st.number_input(f"D{day}", min_value=0.0, value=0.0, step=0.01, key=f"d{day}")
+        if val > 0:
+            roas_dict[day] = val
 
-# Validasyon
 if len(roas_dict) < 3:
     st.warning("⚠️ Lütfen tahmin üretmek için en az 3 adet ROAS değeri girin.")
     st.stop()
@@ -38,9 +34,9 @@ roas_values = np.array([roas_dict[d] for d in days])
 n_points = len(days)
 
 # -------------------------------------------------
-# 2. OTOMATİK MODEL SEÇİMİ VE FIT
+# 2. MODEL SEÇİMİ VE HESAPLAMA
 # -------------------------------------------------
-# Veri miktarına göre rejim belirleme
+# Otomatik Model Seçimi (Regime Detection)
 if n_points <= 4:
     model_type = "Log-Linear"
 elif n_points <= 9:
@@ -50,7 +46,6 @@ else:
 
 future_days = np.array([90, 120, 180, 360, 720])
 
-# Model Hazırlığı
 if model_type == "Log-Linear":
     X = np.log(days).reshape(-1, 1)
     future_X = np.log(future_days).reshape(-1, 1)
@@ -58,8 +53,8 @@ if model_type == "Log-Linear":
 elif model_type == "Power Law":
     X = np.log(days).reshape(-1, 1)
     future_X = np.log(future_days).reshape(-1, 1)
-    y = np.log(roas_values) # Log-Log fit
-else: # Saturation (1/x)
+    y = np.log(roas_values)
+else: # Saturation
     X = (1 / days).reshape(-1, 1)
     future_X = (1 / future_days).reshape(-1, 1)
     y = roas_values
@@ -67,77 +62,87 @@ else: # Saturation (1/x)
 model = LinearRegression()
 model.fit(X, y)
 
-# Tahminleri Hesapla
 if model_type == "Power Law":
     base_pred = np.exp(model.predict(future_X))
-    fitted = np.exp(model.predict(X.reshape(-1, 1)))
+    fitted = np.exp(model.predict(X))
 else:
     base_pred = model.predict(future_X)
-    fitted = model.predict(X.reshape(-1, 1))
+    fitted = model.predict(X)
 
-# -------------------------------------------------
-# 3. BAYESIAN CONFIDENCE & ERROR SIMULATION
-# -------------------------------------------------
-# Residual (artık) analizi ile belirsizlik hesabı
+# Bayesian & Error Simulation
 residuals = roas_values - fitted
-residual_std = np.std(residuals) if len(residuals) > 1 else 0.1
+residual_std = np.std(residuals) if n_points > 1 else 0.1
 posterior_std = residual_std * np.sqrt(1 + 1 / n_points)
 
-# %95 Güven Aralığı (Bayesian Approx)
-lower_conf = base_pred - (1.96 * posterior_std)
-upper_conf = base_pred + (1.96 * posterior_std)
-
-# Error Simulation (Best/Worst Case - Manuel Çarpan)
-error_factor = min(0.3, 1 / np.sqrt(n_points)) # Veri arttıkça daralan hata payı
+error_factor = min(0.3, 1 / np.sqrt(n_points))
 best_case = base_pred * (1 + error_factor)
 worst_case = base_pred * (1 - error_factor)
+lower_conf = np.maximum(base_pred - (1.96 * posterior_std), 0)
+upper_conf = base_pred + (1.96 * posterior_std)
 
 # -------------------------------------------------
-# 4. GÖRSELLEŞTİRME VE SONUÇLAR
+# 3. INTERAKTIF GRAFİK (PLOTLY)
 # -------------------------------------------------
-col1, col2 = st.columns([1, 2])
+fig = go.Figure()
 
-with col1:
-    st.subheader("📋 Tahmin Tablosu")
-    result_df = pd.DataFrame({
-        "Day": future_days,
-        "Worst Case": worst_case.round(3),
-        "Base Case": base_pred.round(3),
-        "Best Case": best_case.round(3),
-        "Lower (Bayes)": np.maximum(lower_conf, 0).round(3),
-        "Upper (Bayes)": upper_conf.round(3)
-    })
-    st.dataframe(result_df, use_container_width=True)
-    
-    st.info(f"""
-    **Seçilen Model:** {model_type}  
-    **Veri Noktası:** {n_points} gün  
-    **Hata Payı:** ±%{error_factor*100:.1f}
-    """)
+# Gerçek Veri (Noktalar)
+fig.add_trace(go.Scatter(
+    x=days, y=roas_values,
+    mode='markers+lines', name='Gerçekleşen ROAS',
+    line=dict(color='red', width=3),
+    marker=dict(size=10)
+))
 
-with col2:
-    st.subheader("📈 Projeksiyon Grafiği")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Mevcut Veri
-    ax.plot(days, roas_values, 'ro-', label="Gerçekleşen ROAS", linewidth=2)
-    
-    # Tahminler
-    ax.plot(future_days, base_pred, 'b--', label="Base Projeksiyon", alpha=0.8)
-    ax.plot(future_days, best_case, 'g:', label="Best Case", alpha=0.6)
-    ax.plot(future_days, worst_case, 'r:', label="Worst Case", alpha=0.6)
-    
-    # Güven Aralığı (Gölge)
-    ax.fill_between(future_days, np.maximum(lower_conf, 0), upper_conf, color='gray', alpha=0.2, label="Bayesian Confidence")
-    
-    ax.set_xscale('log') # Zaman logaritmik eksende daha iyi okunur
-    ax.set_xlabel("Gün (Log Scale)")
-    ax.set_ylabel("ROAS")
-    ax.legend()
-    ax.grid(True, which="both", ls="-", alpha=0.5)
-    
-    st.pyplot(fig)
+# Base Forecast
+fig.add_trace(go.Scatter(
+    x=future_days, y=base_pred,
+    mode='lines+markers', name='Base Case',
+    line=dict(color='blue', dash='dash')
+))
 
-# CSV İndirme Butonu
-csv = result_df.to_csv(index=False).encode('utf-8')
-st.download_button("📊 Verileri CSV Olarak İndir", csv, "roas_forecast.csv", "text/csv")
+# Best Case
+fig.add_trace(go.Scatter(
+    x=future_days, y=best_case,
+    mode='lines', name='Best Case',
+    line=dict(color='green', width=1, dash='dot')
+))
+
+# Worst Case
+fig.add_trace(go.Scatter(
+    x=future_days, y=worst_case,
+    mode='lines', name='Worst Case',
+    line=dict(color='orange', width=1, dash='dot')
+))
+
+# Bayesian Confidence Band (Gölge Alan)
+fig.add_trace(go.Scatter(
+    x=np.concatenate([future_days, future_days[::-1]]),
+    y=np.concatenate([upper_conf, lower_conf[::-1]]),
+    fill='toself', fillcolor='rgba(128,128,128,0.2)',
+    line=dict(color='rgba(255,255,255,0)'),
+    hoverinfo="skip", showlegend=True, name='Bayesian Confidence'
+))
+
+fig.update_layout(
+    title=f"ROAS Projeksiyonu ({model_type} Modeli)",
+    xaxis_title="Gün (Log Scale)", yaxis_title="ROAS",
+    xaxis_type="log", hovermode="x unified",
+    template="plotly_white", height=600
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# -------------------------------------------------
+# 4. TABLO VE EXPORT
+# -------------------------------------------------
+res_df = pd.DataFrame({
+    "Gün": future_days,
+    "Worst Case": worst_case.round(3),
+    "Base Case": base_pred.round(3),
+    "Best Case": best_case.round(3)
+})
+
+st.subheader("📋 Senaryo Detayları")
+st.table(res_df)
+
+st.download_button("📥 Sonuçları CSV Olarak İndir", res_df.to_csv(index=False).encode('utf-8'), "roas_forecast.csv")
