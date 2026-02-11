@@ -99,10 +99,10 @@ def hill_forecast(x,y,d28,d7):
         roas7 = y[0]
 
     if has_28:
-    ltv_mult = 2.2 + 6*d28 + 2*d7
-    L = roas28 * ltv_mult
+        ltv_mult = 2.2 + 6*d28 + 2*d7
+        L = roas28 * ltv_mult
     else:
-    L = roas7 * (5 + 8*d28)
+        L = roas7 * (5 + 8*d28)
 
     # ⭐ early-data clamp
     if not has_28:
@@ -195,5 +195,6 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
 
 
