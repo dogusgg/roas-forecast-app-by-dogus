@@ -6,13 +6,13 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Gompertz Growth · Retention-weighted · IAP / AD separated")
+st.caption("Hybrid-calibrated Gompertz · Retention drives SPEED (not ceiling)")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
-# -------------------
+# -------------------------------------------------
 # Revenue
-# -------------------
+# -------------------------------------------------
 
 fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%","85%","Custom"])
 
@@ -21,11 +21,11 @@ if fee_option=="70%":
 elif fee_option=="85%":
     IAP_GROSS_TO_NET = 0.85
 else:
-    IAP_GROSS_TO_NET = st.number_input("Custom",0.0,1.0,0.70,0.01)
+    IAP_GROSS_TO_NET = st.number_input("Custom IAP_GROSS_TO_NET",0.0,1.0,0.70,0.01)
 
-# -------------------
-# Retention
-# -------------------
+# -------------------------------------------------
+# Optional Retention Days
+# -------------------------------------------------
 
 st.subheader("Retention Inputs")
 
@@ -42,27 +42,23 @@ ret = {}
 
 cols = st.columns(3)
 
-for i, d in enumerate(sorted(ret_days)):
-    with cols[i % 3]:
-        ret[d] = st.number_input(
-            f"D{d} Retention",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.0 if d not in ret_days_default else [0.40,0.20,0.10][ret_days_default.index(d)],
-            step=0.01
+for i,day in enumerate(ret_days):
+    with cols[i%3]:
+        ret[day] = st.number_input(
+            f"D{day} Retention",
+            0.0,1.0,
+            0.40 if day==1 else 0.20 if day==7 else 0.10,
+            0.01
         )
 
-# weighted retention score (nonlinear)
-ret_values = np.array(list(ret.values()))
+# fallback if optional not entered
+d1 = ret.get(1,0.4)
+d7 = ret.get(7,0.2)
+d28 = ret.get(28,0.1)
 
-if len(ret_values)>0:
-    retention_score = np.mean(np.sqrt(ret_values))  # <-- key trick
-else:
-    retention_score = 0.1
-
-# -------------------
-# ROAS Inputs
-# -------------------
+# -------------------------------------------------
+# ROAS INPUT
+# -------------------------------------------------
 
 st.subheader("ROAS Inputs")
 
@@ -80,24 +76,19 @@ roas_ad={}
 
 for d in roas_days:
     c1,c2 = st.columns(2)
-
     with c1:
-        roas_iap[d] = st.number_input(f"IAP Day {d}",0.0,10.0,0.0,0.01)
-
+        roas_iap[d] = st.number_input(f"IAP Day {d}",0.0,step=0.01)
     with c2:
-        roas_ad[d] = st.number_input(f"AD Day {d}",0.0,10.0,0.0,0.01)
+        roas_ad[d] = st.number_input(f"AD Day {d}",0.0,step=0.01)
 
-# observed arrays
-x = np.array(roas_days)
-
-y_iap = np.array([roas_iap[d] for d in roas_days])
-y_ad = np.array([roas_ad[d] for d in roas_days])
+x = np.array(sorted(roas_days))
+y_iap = np.array([roas_iap[d] for d in x])
+y_ad = np.array([roas_ad[d] for d in x])
 
 positive_points = np.sum(y_iap>0) + np.sum(y_ad>0)
 
 run = st.button(
     "🚀 Generate Forecast",
-    type="primary",
     use_container_width=True,
     disabled = positive_points < 3
 )
@@ -108,62 +99,69 @@ if positive_points < 3:
 if not run:
     st.stop()
 
-# -------------------
-# GOMPERTZ MODEL
-# -------------------
+# -------------------------------------------------
+# PRODUCTION GOMPERTZ
+# -------------------------------------------------
 
-def gompertz_forecast(x,y,retention_score):
+def gompertz_forecast(days, roas, is_iap=True):
 
-    mask = y>0
-    x=x[mask]
-    y=y[mask]
+    mask = roas>0
+    days = days[mask]
+    roas = roas[mask]
 
-    if len(y)<3:
+    if len(roas) < 3:
         return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
 
-    # anchor
-    last_roas = y[-1]
+    last_day = days.max()
+    last_roas = roas[-1]
 
-    # detect early spike
-    if 7 in x:
-        r7 = y[x==7][0]
-    else:
-        r7 = y[1]
+    # ---------------------------
+    # REGIME (HYBRID calibrated)
+    # ---------------------------
 
-    growth = last_roas / max(r7,0.01)
+    regime = 3.8 if is_iap else 2.5
 
-    # INDUSTRY LTV MULTIPLIER
-    base_mult = 3.5 + 9*retention_score
+    # monetization signal
+    if 7 in days and last_day>=28:
+        growth = last_roas / max(roas[days==7][0],0.01)
+        regime *= np.clip(growth/2.0,0.85,1.25)
 
-    # spike bonus
-    spike_bonus = np.clip(growth,1.5,4)
+    # HARD CLAMP → runaway killer
+    ceiling = min(last_roas * regime, last_roas * 5.5)
 
-    L = last_roas * base_mult * spike_bonus
+    # ---------------------------
+    # RETENTION -> SPEED ONLY
+    # ---------------------------
 
-    # gompertz params
-    b = 3.2 - retention_score*2
-    c = 0.015 + (1-retention_score)*0.01
+    ret_factor = np.exp(2*(d28-0.10))   # nonlinear sensitivity
 
-    forecast = L * np.exp(-b*np.exp(-c*FUTURE_DAYS))
+    b = 3.0 / ret_factor
+    c = 120 + 220*(1-d28)
 
-    # uncertainty
-    width = 0.18 - retention_score*0.08
+    forecast = ceiling * np.exp(-b * np.exp(-FUTURE_DAYS/c))
+
+    # ---------------------------
+    # UNCERTAINTY
+    # ---------------------------
+
+    width = np.clip(0.22 - d28*0.6, 0.08, 0.22)
+
     low = forecast*(1-width)
     high = forecast*(1+width)
 
     return forecast,low,high
 
 
-iap_mean,iap_low,iap_high = gompertz_forecast(x,y_iap,retention_score)
-ad_mean,ad_low,ad_high = gompertz_forecast(x,y_ad,retention_score)
+iap_mean,iap_low,iap_high = gompertz_forecast(x,y_iap,True)
+ad_mean,ad_low,ad_high = gompertz_forecast(x,y_ad,False)
 
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-# -------------------
+# -------------------------------------------------
 # TABLE
-# -------------------
+# -------------------------------------------------
 
 st.subheader("Forecast")
 
@@ -178,9 +176,11 @@ df = pd.DataFrame({
 
 st.dataframe(df,hide_index=True,use_container_width=True)
 
-# -------------------
-# PLOT
-# -------------------
+# -------------------------------------------------
+# CHART
+# -------------------------------------------------
+
+st.subheader("ROAS Curves")
 
 fig = go.Figure()
 
@@ -210,7 +210,6 @@ fig.add_trace(go.Scatter(
 ))
 
 mask_obs = y_iap>0
-
 fig.add_trace(go.Scatter(
     x=x[mask_obs],
     y=y_iap[mask_obs],
@@ -225,4 +224,3 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
-
