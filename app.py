@@ -164,9 +164,11 @@ def tempered_bayes(x,y,ret_sigma):
 
         sigma = pm.HalfNormal("sigma",0.06)
 
-        mu = pm.math.log(
-            ceiling * (1 - pm.math.exp(-pm.math.exp(alpha)*log_x))
-        )
+        growth = 1 - pm.math.exp(-pm.math.exp(alpha) * log_x)
+
+        growth = pm.math.clip(growth, 1e-6, 1)
+
+        mu = pm.math.log(ceiling * growth)
 
         pm.Normal("obs",mu=mu,sigma=sigma,observed=log_y)
 
@@ -308,4 +310,5 @@ if run_forecast:
     fig.update_xaxes(type="log")
 
     st.plotly_chart(fig,use_container_width=True)
+
 
