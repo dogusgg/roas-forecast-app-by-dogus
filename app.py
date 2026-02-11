@@ -32,7 +32,7 @@ else:
 st.subheader("Retention Inputs")
 
 ret_days_default = [1,7,28]
-ret_days_optional = [45,60]
+ret_days_optional = [3,14,45,60]
 
 ret_selected = st.multiselect(
     "Select retention days",
@@ -239,3 +239,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
