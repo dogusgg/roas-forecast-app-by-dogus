@@ -56,11 +56,13 @@ def retention_score(ret):
     score = 0
 
     weights = {
-        1:0.25,
-        7:0.25,
-        28:0.25,
-        45:0.15,
-        60:0.10
+    1:0.10,
+    3:0.15,
+    7:0.20,
+    14:0.15,
+    28:0.20,
+    45:0.10,
+    60:0.10
     }
 
     for d,val in ret.items():
@@ -239,4 +241,5 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
 
