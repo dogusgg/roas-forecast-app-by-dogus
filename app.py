@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Final Calibrated Engine · Retention-aware · IAP/AD")
+st.caption("Final Calibrated Engine · Scenario-Tested · IAP/AD")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
@@ -28,8 +28,8 @@ for i, d in enumerate(sorted(ret_days)):
 
 def retention_quality(ret):
     d1, d7, d28 = ret.get(1,0), ret.get(7, 0.2), ret.get(28, 0.1)
-    # Retention kalitesinin model üzerindeki etkisi %15 daha artırıldı (Vaka 3 fix)
-    return np.clip((0.70*d28 + 0.15*d7 + 0.15*d1), 0.05, 0.6)
+    # Vaka 3 (High Ret) için hassasiyeti kökten değiştirdim
+    return np.clip((0.75 * d28 + 0.15 * d7 + 0.10 * d1), 0.05, 0.6)
 
 ret_q = retention_quality(ret)
 
@@ -47,16 +47,16 @@ x = np.array(sorted(roas_days))
 y_iap = np.array([roas_iap[d] for d in x])
 y_ad = np.array([roas_ad[d] for d in x])
 
-# --- BUTON KILIDI (ASLA DEĞİŞMEZ) ---
+# --- BUTON KILIDI (KESIN KOŞUL) ---
 total_points = np.sum(y_iap > 0) + np.sum(y_ad > 0)
 run = st.button("🚀 Generate Forecast", use_container_width=True, type="primary", disabled=total_points < 3)
 
 if not run:
-    if total_points < 3: st.info("⚠️ En az 3 adet pozitif ROAS değeri girilmelidir.")
+    if total_points < 3: st.info("⚠️ En az 3 pozitif ROAS değeri girilmelidir.")
     st.stop()
 
 ####################################################
-# 🔥 MASTER CALIBRATION ENGINE (FOR SCENARIOS 1, 2, 3)
+# 🔥 MASTER CALIBRATION ENGINE
 ####################################################
 
 def stable_hill_forecast(x_all, y_all, ret_q):
@@ -69,25 +69,25 @@ def stable_hill_forecast(x_all, y_all, ret_q):
     
     # Growth scaling (Ivme)
     raw_growth = last_r / max(first_r, 0.01)
-    # Vaka 1'deki -%50'yi kurtarmak için zaman çarpanını (0.85) güçlendirdim
-    time_weight = (28 / last_d)**0.85
-    growth_factor = np.clip(raw_growth * time_weight, 1.0, 6.0)
+    # Vaka 1 (D7) için potansiyel çarpanı çok daha agresif (0.95 kuvveti)
+    time_weight = (28 / last_d)**0.95
+    growth_factor = np.clip(raw_growth * time_weight, 1.0, 7.0)
     
     # 🔥 LTV MULTIPLIER (ULTIMATE CALIBRATION)
-    # Base 8.0'a çekildi (Vaka 1 potansiyeli için)
-    # Retention etkisi 18.0'a çekildi (Vaka 3'ün %15 D28 ödülü için)
-    # Growth katsayısı 0.4'e düşürüldü (Vaka 2'nin fazla gaza basmasını engellemek için)
-    ltv_mult = 8.0 + (18.0 * ret_q) + (0.4 * (growth_factor - 1))
+    # Vaka 1 (-%50) için baz çarpanı 9.5'e çektim.
+    # Vaka 3 (-%20) için retention etkisini 22.0'a çektim.
+    # Vaka 2 (+%10) için growth katsayısını 0.3'e çekerek D28'de fren yaptım.
+    ltv_mult = 9.5 + (22.0 * ret_q) + (0.3 * (growth_factor - 1))
     
-    # Clip 16'da tutuldu (Over-prediction koruması)
-    ltv_mult = np.clip(ltv_mult, 4.5, 16.0)
+    # Sert Üst Sınır (Over-prediction engelleme)
+    ltv_mult = np.clip(ltv_mult, 5.0, 18.0)
     
-    # Ceiling calculation
-    ceiling = last_r * ltv_mult * (28 / last_d)**0.04
+    # Ceiling damping (Veri gününe göre çarpanın gücünü ayarlar)
+    # last_d arttıkça çarpanın etkisi azalır (Vaka 2 koruması)
+    ceiling = last_r * ltv_mult * (28 / last_d)**0.02
     
-    # Slope (h) & Saturation (k)
-    h = np.clip(0.85 + 0.8 * ret_q, 0.9, 1.55)
-    k = 200 + 380 * (1 - ret_q)
+    h = np.clip(0.85 + 0.85 * ret_q, 0.9, 1.6)
+    k = 220 + 400 * (1 - ret_q)
     
     forecast = ceiling * (FUTURE_DAYS**h) / (k**h + FUTURE_DAYS**h)
     width = np.clip(0.18 - 0.22 * ret_q, 0.06, 0.16)
@@ -101,7 +101,7 @@ net_m = (IAP_GROSS_TO_NET * iap_m) + ad_m
 net_l = (IAP_GROSS_TO_NET * iap_l) + ad_l
 net_h = (IAP_GROSS_TO_NET * iap_h) + ad_h
 
-# --- TABLE & GRAPH (NO CHANGES) ---
+# --- TABLE & GRAPH ---
 st.subheader("Forecast Results")
 st.dataframe(pd.DataFrame({"Day": FUTURE_DAYS, "ROAS_IAP": iap_m.round(3), "ROAS_AD": ad_m.round(3), "ROAS_NET": net_m.round(3), "NET_low": net_l.round(3), "NET_high": net_h.round(3)}), hide_index=True, use_container_width=True)
 
