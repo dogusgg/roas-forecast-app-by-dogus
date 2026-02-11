@@ -2,13 +2,12 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import pymc as pm
 from scipy.optimize import curve_fit
 
 st.set_page_config(page_title="ROAS Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Hill Bayesian · Crash-proof · Production-style")
+st.caption("Deterministic Power Fit · Production-grade")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
@@ -34,7 +33,7 @@ else:
     )
 
 ############################################################
-# RETENTION → CEILING INFORMER
+# RETENTION → CAP INFORMER
 ############################################################
 
 st.subheader("Retention (optional but recommended)")
@@ -59,7 +58,7 @@ for d in ret_days:
 def weibull(t, lam, k):
     return np.exp(-(t/lam)**k)
 
-ceiling_multiplier = 2.5  # default safe
+cap_multiplier = 2.5  # safe default
 
 if len(ret_days) >= 3:
     try:
@@ -74,15 +73,14 @@ if len(ret_days) >= 3:
 
         half_life = lam * (np.log(2))**(1/k)
 
-        # GOOD retention -> higher ceiling
-        ceiling_multiplier = np.clip(
+        cap_multiplier = np.clip(
             1.8 + half_life/90,
             1.8,
-            4.0
+            4.5
         )
 
     except:
-        st.warning("Retention fit failed — using default ceiling.")
+        st.warning("Retention fit failed — using default cap.")
 
 ############################################################
 # ROAS INPUT
@@ -126,76 +124,52 @@ if not run_enabled:
 run_forecast = st.button(button_label, disabled=not run_enabled)
 
 ############################################################
-# HILL MODEL
+# POWER + SOFT CAP MODEL
 ############################################################
 
-@st.cache_resource
-def hill_bayes(x,y,ceiling_mult):
+def power_softcap_forecast(x,y,cap_mult):
 
     mask = y>0
     x = x[mask]
     y = y[mask]
 
+    logx = np.log(x)
+    logy = np.log(y)
+
+    slope,intercept = np.polyfit(logx,logy,1)
+
+    a = np.exp(intercept)
+    b = slope
+
     anchor = y[-1]
 
-    # slope estimate
-    slope = np.polyfit(np.log(x),np.log(y),1)[0]
-    slope = np.clip(slope,0.2,1.2)
+    cap = anchor * cap_mult
 
-    ceiling_guess = anchor * ceiling_mult
+    def softcap(day):
+        raw = a * day**b
+        return cap * (1 - np.exp(-raw/cap))
 
-    with pm.Model() as model:
+    preds = softcap(FUTURE_DAYS)
 
-        alpha = pm.Normal(
-            "alpha",
-            mu=slope,
-            sigma=0.35
-        )
+    ########################################################
+    # CONFIDENCE via slope variance
+    ########################################################
 
-        tau = pm.LogNormal(
-            "tau",
-            mu=np.log(60),
-            sigma=1.0
-        )
+    residuals = logy - (intercept + slope*logx)
+    sigma = np.std(residuals)
 
-        ceiling = pm.LogNormal(
-            "ceiling",
-            mu=np.log(ceiling_guess),
-            sigma=0.7
-        )
+    upper_slope = b + sigma
+    lower_slope = max(0.05, b - sigma)
 
-        sigma = pm.HalfNormal("sigma",0.12)
+    def band(day, slope):
+        raw = a * day**slope
+        return cap * (1 - np.exp(-raw/cap))
 
-        mu = pm.math.log(
-            ceiling * (x**alpha)/(x**alpha + tau**alpha)
-        )
+    high = band(FUTURE_DAYS, upper_slope)
+    low = band(FUTURE_DAYS, lower_slope)
 
-        pm.Normal("obs",mu=mu,sigma=sigma,observed=np.log(y))
+    return preds, low, high
 
-        trace = pm.sample(
-            draws=300,
-            tune=300,
-            chains=2,
-            target_accept=0.9,
-            progressbar=False
-        )
-
-    future = FUTURE_DAYS
-
-    post = np.exp(
-        np.log(trace.posterior["ceiling"].values[...,None])
-        + np.log(
-            (future**trace.posterior["alpha"].values[...,None]) /
-            (future**trace.posterior["alpha"].values[...,None] +
-             trace.posterior["tau"].values[...,None]**trace.posterior["alpha"].values[...,None])
-        )
-    )
-
-    return (
-        post.mean((0,1)),
-        np.percentile(post,10,(0,1)),
-        np.percentile(post,90,(0,1))
-    )
 
 ############################################################
 # RUN
@@ -206,13 +180,17 @@ if run_forecast:
     streams=[]
 
     if iap_pos>=3:
-        iap_mean,iap_low,iap_high = hill_bayes(x,y_iap,ceiling_multiplier)
+        iap_mean,iap_low,iap_high = power_softcap_forecast(
+            x,y_iap,cap_multiplier
+        )
         streams.append("IAP")
     else:
         iap_mean = iap_low = iap_high = np.zeros(len(FUTURE_DAYS))
 
     if ad_pos>=3:
-        ad_mean,ad_low,ad_high = hill_bayes(x,y_ad,ceiling_multiplier)
+        ad_mean,ad_low,ad_high = power_softcap_forecast(
+            x,y_ad,1.8
+        )
         streams.append("AD")
     else:
         ad_mean = ad_low = ad_high = np.zeros(len(FUTURE_DAYS))
