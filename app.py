@@ -6,15 +6,13 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Deterministic Hill Saturation · Retention-aware · IAP / AD separated")
+st.caption("Gompertz Growth · Retention-weighted · IAP / AD separated")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
-####################################################
+# -------------------
 # Revenue
-####################################################
-
-st.subheader("Revenue Parameters")
+# -------------------
 
 fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%","85%","Custom"])
 
@@ -23,17 +21,11 @@ if fee_option=="70%":
 elif fee_option=="85%":
     IAP_GROSS_TO_NET = 0.85
 else:
-    IAP_GROSS_TO_NET = st.number_input(
-        "Custom IAP_GROSS_TO_NET",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.70,
-        step=0.01
-    )
+    IAP_GROSS_TO_NET = st.number_input("Custom",0.0,1.0,0.70,0.01)
 
-####################################################
-# RETENTION (optional days supported)
-####################################################
+# -------------------
+# Retention
+# -------------------
 
 st.subheader("Retention Inputs")
 
@@ -50,37 +42,21 @@ ret = {}
 
 cols = st.columns(3)
 
-for i, d in enumerate(sorted(ret_days)):
-    with cols[i % 3]:
-        ret[d] = st.number_input(
-            f"D{d} Retention",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.0 if d not in ret_days_default else [0.40,0.20,0.10][ret_days_default.index(d)],
-            step=0.01
-        )
+for i,d in enumerate(ret_days):
+    with cols[i%3]:
+        ret[d] = st.number_input(f"D{d}",0.0,1.0,0.0,0.01)
 
-def retention_quality(ret):
+# weighted retention score (nonlinear)
+ret_values = np.array(list(ret.values()))
 
-    # fallback logic
-    d1 = ret.get(1,0)
-    d7 = ret.get(7, d1*0.5)
-    d28 = ret.get(28, d7*0.5)
+if len(ret_values)>0:
+    retention_score = np.mean(np.sqrt(ret_values))  # <-- key trick
+else:
+    retention_score = 0.1
 
-    # strong weighting → sensitivity artırıldı
-    ret_q = (
-        0.55*d28 +
-        0.30*d7 +
-        0.15*d1
-    )
-
-    return np.clip(ret_q,0.05,0.6)
-
-ret_q = retention_quality(ret)
-
-####################################################
-# ROAS INPUT
-####################################################
+# -------------------
+# ROAS Inputs
+# -------------------
 
 st.subheader("ROAS Inputs")
 
@@ -93,29 +69,31 @@ roas_days = st.multiselect(
     default=roas_days_default
 )
 
-roas_iap = {}
-roas_ad = {}
+roas_iap={}
+roas_ad={}
 
-for d in sorted(roas_days):
+for d in roas_days:
     c1,c2 = st.columns(2)
 
     with c1:
-        roas_iap[d] = st.number_input(f"ROAS_IAP Day {d}",0.0,step=0.01)
+        roas_iap[d] = st.number_input(f"IAP Day {d}",0.0,10.0,0.0,0.01)
 
     with c2:
-        roas_ad[d] = st.number_input(f"ROAS_AD Day {d}",0.0,step=0.01)
+        roas_ad[d] = st.number_input(f"AD Day {d}",0.0,10.0,0.0,0.01)
 
-x = np.array(sorted(roas_days))
-y_iap = np.array([roas_iap[d] for d in x])
-y_ad = np.array([roas_ad[d] for d in x])
+# observed arrays
+x = np.array(roas_days)
+
+y_iap = np.array([roas_iap[d] for d in roas_days])
+y_ad = np.array([roas_ad[d] for d in roas_days])
 
 positive_points = np.sum(y_iap>0) + np.sum(y_ad>0)
 
 run = st.button(
     "🚀 Generate Forecast",
-    use_container_width=True,
     type="primary",
-    disabled=positive_points < 3
+    use_container_width=True,
+    disabled = positive_points < 3
 )
 
 if positive_points < 3:
@@ -124,75 +102,62 @@ if positive_points < 3:
 if not run:
     st.stop()
 
-####################################################
-# 🔥 STABLE HILL MODEL
-####################################################
+# -------------------
+# GOMPERTZ MODEL
+# -------------------
 
-def stable_hill_forecast(x,y,ret_q):
+def gompertz_forecast(x,y,retention_score):
 
     mask = y>0
-    x = x[mask]
-    y = y[mask]
+    x=x[mask]
+    y=y[mask]
 
-    if len(y) < 3:
+    if len(y)<3:
         return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
 
     # anchor
-    if 28 in x:
-        roas28 = y[x==28][0]
-    else:
-        roas28 = y[-1]
+    last_roas = y[-1]
 
+    # detect early spike
     if 7 in x:
-        roas7 = y[x==7][0]
+        r7 = y[x==7][0]
     else:
-        roas7 = y[min(1,len(y)-1)]
+        r7 = y[1]
 
-    growth = np.clip(roas28 / max(roas7,0.01), 1.2, 5)
+    growth = last_roas / max(r7,0.01)
 
-    ################################################
-    # 🔥 LTV MULTIPLIER (HYBRID TUNED)
-    ################################################
+    # INDUSTRY LTV MULTIPLIER
+    base_mult = 3.5 + 9*retention_score
 
-    ltv_mult = 2.4 + 7.5*ret_q + 2.2*(growth-1)
+    # spike bonus
+    spike_bonus = np.clip(growth,1.5,4)
 
-    # HARD GUARDRAILS
-    ltv_mult = np.clip(ltv_mult, 2.5, 12)
+    L = last_roas * base_mult * spike_bonus
 
-    ceiling = roas28 * ltv_mult
+    # gompertz params
+    b = 3.2 - retention_score*2
+    c = 0.015 + (1-retention_score)*0.01
 
-    ################################################
-    # Shape
-    ################################################
+    forecast = L * np.exp(-b*np.exp(-c*FUTURE_DAYS))
 
-    h = np.clip(0.85 + 0.6*ret_q, 0.9, 1.45)
-
-    k = 140 + 260*(1-ret_q)
-
-    forecast = ceiling * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
-
-    ################################################
-    # Confidence (tightened)
-    ################################################
-
-    width = np.clip(0.18 - 0.22*ret_q, 0.06, 0.16)
-
+    # uncertainty
+    width = 0.18 - retention_score*0.08
     low = forecast*(1-width)
     high = forecast*(1+width)
 
     return forecast,low,high
 
 
-iap_mean,iap_low,iap_high = stable_hill_forecast(x,y_iap,ret_q)
-ad_mean,ad_low,ad_high = stable_hill_forecast(x,y_ad,ret_q)
+iap_mean,iap_low,iap_high = gompertz_forecast(x,y_iap,retention_score)
+ad_mean,ad_low,ad_high = gompertz_forecast(x,y_ad,retention_score)
 
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-####################################################
+# -------------------
 # TABLE
-####################################################
+# -------------------
 
 st.subheader("Forecast")
 
@@ -207,11 +172,9 @@ df = pd.DataFrame({
 
 st.dataframe(df,hide_index=True,use_container_width=True)
 
-####################################################
+# -------------------
 # PLOT
-####################################################
-
-st.subheader("ROAS Curves")
+# -------------------
 
 fig = go.Figure()
 
@@ -240,8 +203,8 @@ fig.add_trace(go.Scatter(
     name="IAP"
 ))
 
-# Observed only positive
 mask_obs = y_iap>0
+
 fig.add_trace(go.Scatter(
     x=x[mask_obs],
     y=y_iap[mask_obs],
