@@ -95,4 +95,9 @@ st.dataframe(df, hide_index=True, use_container_width=True)
 # --- Grafik ---
 st.subheader("ROAS Curves")
 fig = go.Figure()
-fig.add_trace(go
+fig.add_trace(go.Scatter(x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]), y=np.concatenate([net_h,net_l[::-1]]), fill="toself", fillcolor="rgba(150,150,150,0.25)", line=dict(color="rgba(255,255,255,0)"), name="Confidence"))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_mean if 'net_mean' in locals() else net_m, mode="lines", line=dict(width=4), name="NET"))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_m, mode="lines", line=dict(dash="dash"), name="IAP"))
+fig.add_trace(go.Scatter(x=x[y_iap>0], y=y_iap[y_iap>0], mode="markers", name="Observed IAP"))
+fig.update_layout(template="plotly_white", height=520, hovermode="x unified")
+st.plotly_chart(fig, use_container_width=True)
