@@ -76,7 +76,7 @@ if not run_forecast:
 # Hill Model
 # ------------------------
 
-def hill_forecast(x,y):
+def hill_forecast(x,y,d28):
 
     mask = y>0
     x = x[mask]
@@ -85,30 +85,36 @@ def hill_forecast(x,y):
     if len(y)<3:
         return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
 
-    roas_last = y[-1]
+    roas7 = y[x==7][0] if 7 in x else y[1]
+    roas28 = y[x==28][0] if 28 in x else y[-1]
 
-    # retention-based multiplier
-    multiplier = 1.8 + 6*ret_score
-    L = roas_last * multiplier
+    growth_ratio = roas28 / max(roas7,0.01)
 
-    # slope for shape
+    # ⭐ growth-driven ceiling
+    L_raw = roas28 * (2.5 + 4*growth_ratio)
+
+    # ⭐ retention brake
+    retention_brake = 0.35 + d28
+    L = L_raw * retention_brake
+
+    # shape
     beta = np.polyfit(np.log(x),np.log(y),1)[0]
-    h = np.clip(beta,0.4,1.2)
+    h = np.clip(beta,0.5,1.4)
 
-    # half-saturation day
-    k = 150 + 200*(ret_score)
+    # half saturation
+    k = 110 + 180*(1-d28)
 
-    forecast = L * (FUTURE_DAYS**h) / (k**h + FUTURE_DAYS**h)
+    forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
-    # confidence
-    width = max(0.05,0.18-0.6*ret_score)
+    width = max(0.07,0.16 - d28*0.4)
+
     low = forecast*(1-width)
     high = forecast*(1+width)
 
     return forecast,low,high
 
-iap_mean,iap_low,iap_high = hill_forecast(days,y_iap)
-ad_mean,ad_low,ad_high = hill_forecast(days,y_ad)
+iap_mean,iap_low,iap_high = hill_forecast(days,y_iap,d28)
+ad_mean,ad_low,ad_high = hill_forecast(days,y_ad,d28)
 
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low = IAP_GROSS_TO_NET * iap_low + ad_low
@@ -177,3 +183,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
