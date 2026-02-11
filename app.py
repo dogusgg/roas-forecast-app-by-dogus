@@ -42,9 +42,15 @@ ret = {}
 
 cols = st.columns(3)
 
-for i,d in enumerate(ret_days):
-    with cols[i%3]:
-        ret[d] = st.number_input(f"D{d}",0.0,1.0,0.0,0.01)
+for i, d in enumerate(sorted(ret_days)):
+    with cols[i % 3]:
+        ret[d] = st.number_input(
+            f"D{d} Retention",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.0 if d not in ret_days_default else [0.40,0.20,0.10][ret_days_default.index(d)],
+            step=0.01
+        )
 
 # weighted retention score (nonlinear)
 ret_values = np.array(list(ret.values()))
@@ -219,3 +225,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
