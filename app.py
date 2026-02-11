@@ -7,7 +7,7 @@ from scipy.optimize import curve_fit
 st.set_page_config(page_title="ROAS Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Deterministic Power Fit · Production-grade")
+st.caption("Retention-driven Hybrid · Production Style")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
@@ -17,10 +17,7 @@ FUTURE_DAYS = np.array([90,120,180,360,720])
 
 st.subheader("Revenue Parameters")
 
-fee_option = st.selectbox(
-    "IAP_GROSS_TO_NET",
-    ["70%", "85%", "Custom"]
-)
+fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%", "85%", "Custom"])
 
 if fee_option == "70%":
     IAP_GROSS_TO_NET = 0.70
@@ -33,54 +30,52 @@ else:
     )
 
 ############################################################
-# RETENTION → CAP INFORMER
+# RETENTION
 ############################################################
 
-st.subheader("Retention (optional but recommended)")
+st.subheader("Retention Inputs")
 
-ret_days = st.multiselect(
-    "Retention days",
-    [1,7,14,28,45,60],
-    default=[1,7,28]
-)
+ret1 = st.number_input("D1 retention %",0.0,100.0,40.0)/100
+ret7 = st.number_input("D7 retention %",0.0,100.0,20.0)/100
+ret28 = st.number_input("D28 retention %",0.0,100.0,10.0)/100
 
-ret = {}
-
-for d in ret_days:
-    ret[d] = st.number_input(
-        f"D{d} retention %",
-        0.0,100.0,
-        value=40.0 if d==1 else 20.0 if d==7 else 10.0,
-        step=0.1
-    ) / 100
-
+ret_days = np.array([1,7,28])
+ret_vals = np.array([ret1,ret7,ret28])
 
 def weibull(t, lam, k):
     return np.exp(-(t/lam)**k)
 
-cap_multiplier = 2.5  # safe default
+params,_ = curve_fit(
+    weibull,
+    ret_days,
+    ret_vals,
+    bounds=(0,[200,3])
+)
 
-if len(ret_days) >= 3:
-    try:
-        params,_ = curve_fit(
-            weibull,
-            np.array(list(ret.keys())),
-            np.array(list(ret.values())),
-            bounds=(0,[200,3])
-        )
+lam,k = params
 
-        lam,k = params
+half_life = lam * (np.log(2))**(1/k)
 
-        half_life = lam * (np.log(2))**(1/k)
+st.caption(f"Estimated retention half-life ≈ **{int(half_life)} days**")
 
-        cap_multiplier = np.clip(
-            1.8 + half_life/90,
-            1.8,
-            4.5
-        )
+############################################################
+# MULTIPLIER ENGINE
+############################################################
 
-    except:
-        st.warning("Retention fit failed — using default cap.")
+def multiplier_from_half_life(h):
+
+    if h < 20:
+        return 1.6
+    elif h < 40:
+        return 2.0
+    elif h < 60:
+        return 2.6
+    elif h < 90:
+        return 3.2
+    else:
+        return 4.0
+
+base_mult = multiplier_from_half_life(half_life)
 
 ############################################################
 # ROAS INPUT
@@ -88,124 +83,80 @@ if len(ret_days) >= 3:
 
 st.subheader("ROAS Inputs")
 
-options = list(range(1,29)) + [45,60]
+roas = {
+    1: st.number_input("ROAS D1",0.0,step=0.01),
+    3: st.number_input("ROAS D3",0.0,step=0.01),
+    7: st.number_input("ROAS D7",0.0,step=0.01),
+    14: st.number_input("ROAS D14",0.0,step=0.01),
+    28: st.number_input("ROAS D28",0.0,step=0.01),
+}
 
-days_selected = st.multiselect(
-    "ROAS days",
-    options,
-    default=[1,3,7,14,28]
+x = np.array([d for d,v in roas.items() if v>0])
+y = np.array([v for v in roas.values() if v>0])
+
+run_enabled = len(y) >= 3
+
+run_forecast = st.button(
+    "🚀 Generate Forecast",
+    disabled=not run_enabled
 )
 
-roas_iap, roas_ad = {},{}
-
-for d in sorted(days_selected):
-    c1,c2 = st.columns(2)
-
-    with c1:
-        roas_iap[d] = st.number_input(f"IAP D{d}",0.0,step=0.01)
-
-    with c2:
-        roas_ad[d] = st.number_input(f"AD D{d}",0.0,step=0.01)
-
-x = np.array(sorted(days_selected))
-
-y_iap = np.array([roas_iap[d] for d in x])
-y_ad = np.array([roas_ad[d] for d in x])
-
-iap_pos = np.sum(y_iap>0)
-ad_pos = np.sum(y_ad>0)
-
-run_enabled = (iap_pos>=3) or (ad_pos>=3)
-
-button_label = "🚀 Generate Forecast"
-if not run_enabled:
-    button_label += " (need ≥3 positive ROAS)"
-
-run_forecast = st.button(button_label, disabled=not run_enabled)
-
 ############################################################
-# POWER + SOFT CAP MODEL
-############################################################
-
-def power_softcap_forecast(x,y,cap_mult):
-
-    mask = y>0
-    x = x[mask]
-    y = y[mask]
-
-    logx = np.log(x)
-    logy = np.log(y)
-
-    slope,intercept = np.polyfit(logx,logy,1)
-
-    a = np.exp(intercept)
-    b = slope
-
-    anchor = y[-1]
-
-    cap = anchor * cap_mult
-
-    def softcap(day):
-        raw = a * day**b
-        return cap * (1 - np.exp(-raw/cap))
-
-    preds = softcap(FUTURE_DAYS)
-
-    ########################################################
-    # CONFIDENCE via slope variance
-    ########################################################
-
-    residuals = logy - (intercept + slope*logx)
-    sigma = np.std(residuals)
-
-    upper_slope = b + sigma
-    lower_slope = max(0.05, b - sigma)
-
-    def band(day, slope):
-        raw = a * day**slope
-        return cap * (1 - np.exp(-raw/cap))
-
-    high = band(FUTURE_DAYS, upper_slope)
-    low = band(FUTURE_DAYS, lower_slope)
-
-    return preds, low, high
-
-
-############################################################
-# RUN
+# FORECAST
 ############################################################
 
 if run_forecast:
 
-    streams=[]
+    anchor = roas[28]
 
-    if iap_pos>=3:
-        iap_mean,iap_low,iap_high = power_softcap_forecast(
-            x,y_iap,cap_multiplier
-        )
-        streams.append("IAP")
-    else:
-        iap_mean = iap_low = iap_high = np.zeros(len(FUTURE_DAYS))
+    ########################################################
+    # slope boost
+    ########################################################
 
-    if ad_pos>=3:
-        ad_mean,ad_low,ad_high = power_softcap_forecast(
-            x,y_ad,1.8
-        )
-        streams.append("AD")
-    else:
-        ad_mean = ad_low = ad_high = np.zeros(len(FUTURE_DAYS))
+    slope = np.polyfit(np.log(x),np.log(y),1)[0]
 
-    st.caption(f"Forecast generated for: {', '.join(streams)}")
+    slope_boost = np.clip((slope-0.35)*0.6,0,0.25)
 
-    net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
-    net_low = IAP_GROSS_TO_NET * iap_low + ad_low
-    net_high = IAP_GROSS_TO_NET * iap_high + ad_high
+    final_mult = base_mult * (1+slope_boost)
+
+    st.caption(f"ROAS360 multiplier ≈ **{final_mult:.2f}x**")
+
+    roas360 = anchor * final_mult
+
+    ########################################################
+    # curve
+    ########################################################
+
+    beta = np.clip(slope,0.25,0.6)
+
+    def curve(t):
+        raw = anchor * (t/28)**beta
+        return np.minimum(raw,roas360)
+
+    preds = curve(FUTURE_DAYS)
+
+    ########################################################
+    # confidence
+    ########################################################
+
+    low_mult = final_mult*0.85
+    high_mult = final_mult*1.15
+
+    low = np.minimum(anchor*(FUTURE_DAYS/28)**beta, anchor*low_mult)
+    high = np.minimum(anchor*(FUTURE_DAYS/28)**beta, anchor*high_mult)
+
+    ########################################################
+    # NET
+    ########################################################
+
+    net_mean = preds * IAP_GROSS_TO_NET
+    net_low = low * IAP_GROSS_TO_NET
+    net_high = high * IAP_GROSS_TO_NET
 
     df = pd.DataFrame({
         "Day":FUTURE_DAYS,
-        "IAP":iap_mean,
-        "AD":ad_mean,
-        "NET":net_mean,
+        "ROAS_IAP":preds,
+        "ROAS_NET":net_mean,
         "NET_low":net_low,
         "NET_high":net_high
     })
@@ -250,35 +201,19 @@ if run_forecast:
         name="NET"
     ))
 
-    if iap_pos>=3:
-        fig.add_trace(go.Scatter(
-            x=FUTURE_DAYS,
-            y=iap_mean,
-            line=dict(dash="dash"),
-            name="IAP"
-        ))
+    fig.add_trace(go.Scatter(
+        x=FUTURE_DAYS,
+        y=preds,
+        line=dict(dash="dash"),
+        name="IAP"
+    ))
 
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=y_iap,
-            mode="markers",
-            name="Observed IAP"
-        ))
-
-    if ad_pos>=3:
-        fig.add_trace(go.Scatter(
-            x=FUTURE_DAYS,
-            y=ad_mean,
-            line=dict(dash="dot"),
-            name="AD"
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=y_ad,
-            mode="markers",
-            name="Observed AD"
-        ))
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode="markers",
+        name="Observed"
+    ))
 
     fig.update_layout(
         template="plotly_white",
