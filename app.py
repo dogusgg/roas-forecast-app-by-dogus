@@ -89,32 +89,23 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     last_day = days_array[mask][-1]
     last_roas = roas_array[mask][-1]
     
-    # Retention Skoru Bazlı Dinamik Parametreler (0.16 ve 0.205 geçişleri için)
-    # h (slope) parametresi iap720/360 oranını belirler
-    h = 0.42 + (ret_score - 0.16) * 1.8
-    k = 350.0 + (ret_score - 0.16) * 800
+    # Base Multiplier (Net Target için 36.5 katsayısı)
+    base_mult = 36.5 * (last_day ** -0.55)
     
-    # Base Multiplier
-    base_mult = 32.5 * (last_day ** -0.52)
-    
-    # Retention Elasticity
-    ret_factor = (ret_score / 0.16) ** 1.25
-    
+    # 🔥 AD Kesintisi: Çarpanın yarısı
     if mode == "ad":
-        # AD Multiplier Fix: Eskisi gibi %50 ceza yok, %40-50 artış hedefleri için ayarlandı
-        final_mult = base_mult * ret_factor * 0.88
-    else:
-        # IAP %10 Down-scale korundu
-        final_mult = base_mult * ret_factor * 0.90
+        base_mult = base_mult * 0.5
+        
+    ret_factor = (ret_score / 0.16) ** 1.1
+    final_mult = base_mult * ret_factor
+    
+    # 🔥 IAP Kesintisi: %10 down-scale
+    if mode == "iap":
+        final_mult = final_mult * 0.90
 
     ceiling_roas = last_roas * final_mult
-    
-    # Hill fonksiyonu ile projeksiyon
-    def hill(t, k_val, h_val): return (t**h_val) / (k_val**h_val + t**h_val)
-    
-    # Normalizasyon: last_day'deki değeri last_roas'a sabitleyip geleceği tahmin et
-    scale = last_roas / hill(last_day, k, h)
-    return scale * hill(FUTURE_DAYS, k, h)
+    k, h = 85.0, 1.2
+    return ceiling_roas * (FUTURE_DAYS**h) / (k**h + FUTURE_DAYS**h)
 
 # ==========================================
 # 3. EXECUTION
@@ -127,7 +118,8 @@ ad_pred = projected_hill_function(x_days, y_ad, ret_score, mode="ad")
 net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
 
 # BANTLAR (Confidence Intervals)
-uncertainty = 0.18 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
+# D7 verisinde %20 belirsizlik, veri olgunlaştıkça daralıyor
+uncertainty = 0.20 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
 net_low = net_pred * (1 - uncertainty)
 net_high = net_pred * (1 + uncertainty)
 
@@ -144,8 +136,7 @@ with col_res1:
 with col_res2:
     st.metric("D180 Forecast (Net)", f"{net_pred[2]:.2f}x")
 with col_res3:
-    last_obs_total = (y_iap[-1]*GROSS_TO_NET) + y_ad[-1]
-    st.metric("Implied LTV Multiplier", f"{(net_pred[3] / last_obs_total if last_obs_total > 0 else 0):.1f}x")
+    st.metric("Implied LTV Multiplier", f"{(net_pred[3] / ((y_iap[-1]*GROSS_TO_NET)+y_ad[-1]) if (y_iap[-1]+y_ad[-1])>0 else 0):.1f}x")
 
 # FULL DATA TABLE
 df_res = pd.DataFrame({
@@ -161,7 +152,7 @@ st.dataframe(df_res, use_container_width=True, hide_index=True)
 # FULL CHART WITH TUNNEL
 fig = go.Figure()
 
-# Confidence Tunnel
+# Confidence Tunnel (The "Band")
 fig.add_trace(go.Scatter(
     x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]),
     y=np.concatenate([net_high, net_low[::-1]]),
@@ -171,16 +162,13 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Forecast'))
-fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP Contribution'))
-fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=ad_pred, mode='lines', line=dict(color='#FFBD45', dash='dot'), name='Ad Forecast'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=ad_pred, mode='lines', line=dict(color='#FFBD45', dash='dot'), name='Ad ROAS'))
 
-# FIX 1: Dinamik Observed Veri Noktaları
-if np.any(y_iap > 0):
-    fig.add_trace(go.Scatter(x=x_days[y_iap>0], y=y_iap[y_iap>0]*GROSS_TO_NET, mode='markers', 
-                             marker=dict(color='#29B09D', size=10, symbol='x'), name='IAP Observed (Net)'))
-if np.any(y_ad > 0):
-    fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', 
-                             marker=dict(color='#FFBD45', size=10, symbol='circle'), name='Ad Observed'))
+# Actual Points
+obs_net = (y_iap * GROSS_TO_NET) + y_ad
+fig.add_trace(go.Scatter(x=x_days[y_iap>0], y=y_iap[y_iap>0], mode='markers', marker=dict(color='red', size=10), name='IAP_Observed'))
+fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marker=dict(color='red', size=10), name='AD_Observed'))
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
