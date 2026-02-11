@@ -2,130 +2,243 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from sklearn.linear_model import LinearRegression
 
-# Sayfa Yapılandırması
-st.set_page_config(page_title="ROAS Forecast Pro", page_icon="📈", layout="wide")
+st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
-# Custom CSS - Daha modern bir görünüm için
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .stNumberInput { border-radius: 8px; }
-    .stButton>button { width: 100%; border-radius: 20px; height: 3em; background-color: #007bff; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("📈 ROAS Long-Term Forecast")
+st.caption("Hill Saturation · Retention-aware · IAP / AD separated")
 
-st.title("📈 ROAS Long-Term Forecasting Tool")
-st.caption("Early signals'tan (D1-D28) 720 güne kadar akıllı projeksiyon.")
+FUTURE_DAYS = np.array([90,120,180,360,720])
 
-# -------------------------
-# 1. INPUT ALANI (Ana Ekran)
-# -------------------------
-with st.container():
-    st.subheader("📊 Short-Term ROAS Inputs")
-    st.info("💡 En az 3 adet değer girin. Boş bırakılan günler tahminde dikkate alınmaz.")
-    
-    # Veri girişini 7'li sütunlara bölerek daha temiz bir tablo görünümü sağlıyoruz
-    input_data = {}
-    for row in range(4): # 4 satır x 7 sütun = 28 gün
-        cols = st.columns(7)
-        for col_idx in range(7):
-            day = row * 7 + col_idx + 1
-            with cols[col_idx]:
-                val = st.number_input(f"Day {day}", min_value=0.0, step=0.01, key=f"d{day}", format="%.2f")
-                if val > 0:
-                    input_data[day] = val
+########################################
+# Revenue
+########################################
 
-# -------------------------
-# 2. AYARLAR & HESAPLAMA
-# -------------------------
-st.divider()
+st.subheader("Revenue Parameters")
 
-if len(input_data) < 3:
-    st.warning("👉 Devam etmek için en az 3 adet veri girişi yapmalısınız.")
+fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%","85%","Custom"])
+
+if fee_option=="70%":
+    IAP_GROSS_TO_NET = 0.70
+elif fee_option=="85%":
+    IAP_GROSS_TO_NET = 0.85
+else:
+    IAP_GROSS_TO_NET = st.number_input("Custom IAP_GROSS_TO_NET",0.0,1.0,0.70,0.01)
+
+########################################
+# Retention (45 & 60 optional)
+########################################
+
+st.subheader("Retention Inputs")
+
+ret_days_default = [1,7,28]
+ret_days_optional = [3,14,45,60]
+
+ret_selected = st.multiselect(
+    "Select retention days",
+    ret_days_default + ret_days_optional,
+    default=ret_days_default
+)
+
+ret = {}
+
+cols = st.columns(len(ret_selected))
+
+for i,d in enumerate(sorted(ret_selected)):
+    with cols[i]:
+        ret[d] = st.number_input(f"D{d}",0.0,1.0,0.0,0.01)
+
+def retention_score(ret):
+
+    if len(ret)==0:
+        return 0.15
+
+    score = 0
+
+    weights = {
+    1:0.10,
+    3:0.15,
+    7:0.20,
+    14:0.15,
+    28:0.20,
+    45:0.10,
+    60:0.10
+    }
+
+    for d,val in ret.items():
+        score += weights.get(d,0)*val
+
+    return np.clip(score,0.05,0.6)
+
+ret_score = retention_score(ret)
+
+########################################
+# ROAS INPUTS (45-60 optional)
+########################################
+
+st.subheader("ROAS Inputs")
+
+day_options = [1,3,7,14,28,45,60]
+
+selected_days = st.multiselect(
+    "Select ROAS days",
+    day_options,
+    default=[1,3,7,14,28]
+)
+
+days = np.array(sorted(selected_days))
+
+roas_iap = {}
+roas_ad = {}
+
+for d in days:
+    c1,c2 = st.columns(2)
+    with c1:
+        roas_iap[d] = st.number_input(f"ROAS_IAP Day {d}",0.0,step=0.01)
+    with c2:
+        roas_ad[d] = st.number_input(f"ROAS_AD Day {d}",0.0,step=0.01)
+
+y_iap = np.array([roas_iap[d] for d in days])
+y_ad = np.array([roas_ad[d] for d in days])
+
+positive_points = np.sum(y_iap>0) + np.sum(y_ad>0)
+
+run_forecast = st.button(
+    "🚀 Generate Forecast",
+    type="primary",
+    use_container_width=True,
+    disabled = positive_points < 3
+)
+
+if positive_points < 3:
+    st.info("Enter at least 3 positive ROAS values.")
+
+if not run_forecast:
     st.stop()
 
-days = np.array(sorted(input_data.keys()))
-roas_values = np.array([input_data[d] for d in days])
-n_points = len(days)
+########################################
+# STABLE HILL MODEL
+########################################
 
-# Model Seçimi
-if n_points <= 4:
-    model_type = "Log-Linear (Stabil)"
-    X, y = np.log(days).reshape(-1, 1), roas_values
-elif n_points <= 9:
-    model_type = "Power Law (Agresif)"
-    X, y = np.log(days).reshape(-1, 1), np.log(roas_values)
-else:
-    model_type = "Saturation (Doygunluk)"
-    X, y = (1 / days).reshape(-1, 1), roas_values
+def hill_forecast(x,y,ret_score):
 
-# Fit & Predict
-model = LinearRegression().fit(X, y)
-future_days = np.array([90, 120, 180, 360, 720])
-future_X = np.log(future_days).reshape(-1, 1) if "Saturation" not in model_type else (1 / future_days).reshape(-1, 1)
+    mask = y>0
+    x = x[mask]
+    y = y[mask]
 
-if "Power" in model_type:
-    base_pred = np.exp(model.predict(future_X))
-    fitted = np.exp(model.predict(X))
-else:
-    base_pred = model.predict(future_X)
-    fitted = model.predict(X)
+    if len(y)<3:
+        return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
 
-# Belirsizlik Hesapları
-error_factor = min(0.3, 1.2 / np.sqrt(n_points))
-best_case = base_pred * (1 + error_factor)
-worst_case = base_pred * (1 - error_factor)
+    last_day = x.max()
+    roas_last = y[x.argmax()]
 
-# -------------------------
-# 3. GÖRSELLEŞTİRME (PLOTLY)
-# -------------------------
+    # runaway protection if only early data exists
+    if last_day <= 7:
+        ceiling_mult = 2.5 + 3*ret_score
+    elif last_day <= 14:
+        ceiling_mult = 3 + 4*ret_score
+    else:
+        ceiling_mult = 3.5 + 6*ret_score
+
+    L = roas_last * ceiling_mult
+
+    # curvature from log slope
+    beta = np.polyfit(np.log(x),np.log(y),1)[0]
+    h = np.clip(beta,0.65,1.25)
+
+    # retention strongly controls half-saturation
+    k = 180 - (ret_score*140)
+
+    forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
+
+    width = 0.18 - ret_score*0.12
+    width = np.clip(width,0.06,0.18)
+
+    low = forecast*(1-width)
+    high = forecast*(1+width)
+
+    return forecast,low,high
+
+
+iap_mean,iap_low,iap_high = hill_forecast(days,y_iap,ret_score)
+ad_mean,ad_low,ad_high = hill_forecast(days,y_ad,ret_score)
+
+net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
+net_low = IAP_GROSS_TO_NET * iap_low + ad_low
+net_high = IAP_GROSS_TO_NET * iap_high + ad_high
+
+########################################
+# TABLE
+########################################
+
+st.subheader("Forecast")
+
+df = pd.DataFrame({
+    "Day":FUTURE_DAYS,
+    "ROAS_IAP":np.round(iap_mean,3),
+    "ROAS_AD":np.round(ad_mean,3),
+    "ROAS_NET":np.round(net_mean,3),
+    "NET_low":np.round(net_low,3),
+    "NET_high":np.round(net_high,3)
+})
+
+st.dataframe(df,hide_index=True,use_container_width=True)
+
+########################################
+# PLOT
+########################################
+
+st.subheader("ROAS Curves")
+
 fig = go.Figure()
 
-# Gerçek Veri
-fig.add_trace(go.Scatter(x=days, y=roas_values, name='Actual ROAS', mode='lines+markers', line=dict(color='#FF4B4B', width=4)))
-
-# Senaryolar
-fig.add_trace(go.Scatter(x=future_days, y=base_pred, name='Base Case', line=dict(color='#1F77B4', width=3, dash='dash')))
-fig.add_trace(go.Scatter(x=future_days, y=best_case, name='Best Case', line=dict(color='#2CA02C', width=1, dash='dot')))
-fig.add_trace(go.Scatter(x=future_days, y=worst_case, name='Worst Case', line=dict(color='#FF7F0E', width=1, dash='dot')))
-
-# Confidence Alanı
 fig.add_trace(go.Scatter(
-    x=np.concatenate([future_days, future_days[::-1]]),
-    y=np.concatenate([best_case, worst_case[::-1]]),
-    fill='toself', fillcolor='rgba(31, 119, 180, 0.1)', line=dict(color='rgba(255,255,255,0)'),
-    name='Risk Zone', hoverinfo="skip"
+    x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]),
+    y=np.concatenate([net_high,net_low[::-1]]),
+    fill="toself",
+    fillcolor="rgba(150,150,150,0.25)",
+    line=dict(color="rgba(255,255,255,0)"),
+    name="Confidence"
+))
+
+fig.add_trace(go.Scatter(
+    x=FUTURE_DAYS,
+    y=net_mean,
+    mode="lines",
+    line=dict(width=4),
+    name="NET"
+))
+
+fig.add_trace(go.Scatter(
+    x=FUTURE_DAYS,
+    y=iap_mean,
+    mode="lines",
+    line=dict(dash="dash"),
+    name="IAP"
+))
+
+# observed only >0
+mask_obs = y_iap>0
+fig.add_trace(go.Scatter(
+    x=days[mask_obs],
+    y=y_iap[mask_obs],
+    mode="markers",
+    name="Observed IAP"
+))
+
+mask_obs_ad = y_ad>0
+fig.add_trace(go.Scatter(
+    x=days[mask_obs_ad],
+    y=y_ad[mask_obs_ad],
+    mode="markers",
+    name="Observed AD"
 ))
 
 fig.update_layout(
-    template="simple_white",
-    hovermode="x unified",
-    xaxis=dict(type="log", title="Days (Log Scale)", gridcolor="#f0f0f0"),
-    yaxis=dict(title="ROAS Value", gridcolor="#f0f0f0"),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(l=0, r=0, t=50, b=0),
-    height=500
+    template="plotly_white",
+    height=520,
+    hovermode="x unified"
 )
 
-# Sol tarafta metrikler, sağ tarafta grafik
-c1, c2 = st.columns([1, 3])
-with c1:
-    st.metric("Model Rejimi", model_type.split(" ")[0])
-    st.metric("Veri Gücü", f"{n_points} Nokta")
-    st.metric("Tahmin Belirsizliği", f"±%{error_factor*100:.0f}")
-    
-    res_df = pd.DataFrame({"Day": future_days, "ROAS": base_pred.round(2)})
-    st.dataframe(res_df, hide_index=True, use_container_width=True)
+st.plotly_chart(fig,use_container_width=True)
 
-with c2:
-    st.plotly_chart(fig, use_container_width=True)
-
-# -------------------------
-# 4. EXPORT
-# -------------------------
-st.divider()
-st.download_button("📥 Tahminleri CSV Olarak İndir", 
-                   pd.DataFrame({"Day": future_days, "Worst": worst_case, "Base": base_pred, "Best": best_case}).to_csv(index=False), 
-                   "roas_forecast.csv")
