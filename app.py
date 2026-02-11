@@ -67,6 +67,20 @@ x = np.array(days)
 y_iap = np.array([roas_iap[d] for d in days])
 y_ad = np.array([roas_ad[d] for d in days])
 
+positive_points = np.sum(y_iap > 0) + np.sum(y_ad > 0)
+
+run_forecast = st.button(
+    "🚀 Generate Forecast",
+    disabled = positive_points < 3
+)
+
+if positive_points < 3:
+    st.info("Enter at least 3 positive ROAS values to generate forecast.")
+
+if not run_forecast:
+    st.stop()
+
+
 def forecast_component(x, y):
 
     mask = y > 0
@@ -162,3 +176,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
