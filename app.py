@@ -98,10 +98,11 @@ def hill_forecast(x,y,d28,d7):
     else:
         roas7 = y[0]
 
-    growth_ratio = roas28 / max(roas7,0.01)
-
-    # ⭐ CEILING — growth only
-    L = roas28 * (1.9 + 2.2*growth_ratio)
+    if has_28:
+    ltv_mult = 2.2 + 6*d28 + 2*d7
+    L = roas28 * ltv_mult
+    else:
+    L = roas7 * (5 + 8*d28)
 
     # ⭐ early-data clamp
     if not has_28:
@@ -113,7 +114,7 @@ def hill_forecast(x,y,d28,d7):
 
     # ⭐ retention controls curve length — NOT ceiling
     retention_factor = 1 + 3*d28 + 1.5*d7
-    k = 120 * retention_factor
+    k = 160 + 400*d28
 
     forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
@@ -194,4 +195,5 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
 
