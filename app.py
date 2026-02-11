@@ -42,7 +42,7 @@ with c2:
 
 # --- B. Retention (The Signal) ---
 st.subheader("2. Retention Metrics")
-st.info("💡 Model, D28 Retention verisine yüksek ağırlık verir.")
+
 ret_days_options = [1, 3, 7, 14, 28, 60]
 sel_ret_days = st.multiselect("Select Available Retention Days", ret_days_options, default=[1, 7, 28])
 
@@ -193,4 +193,5 @@ mask_obs = observed_net > 0
 fig.add_trace(go.Scatter(x=x_days[mask_obs], y=observed_net[mask_obs], mode='markers', marker=dict(color='red', size=12, symbol='circle'), name='Actual Data'))
 fig.update_layout(title="Cumulative Net ROAS Trajectory", xaxis_title="Days Since Install", yaxis_title="ROAS (x)", template="plotly_white", height=500, hovermode="x unified", xaxis=dict(tickmode='array', tickvals=[7, 14, 28, 90, 180, 360, 720]))
 st.plotly_chart(fig, use_container_width=True)
+
 
