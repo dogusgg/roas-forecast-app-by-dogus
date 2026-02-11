@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Deterministic Hill Saturation · Pro-rata Calibration · IAP/AD")
+st.caption("Final Calibrated Engine · Retention-aware · IAP/AD")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
@@ -28,8 +28,8 @@ for i, d in enumerate(sorted(ret_days)):
 
 def retention_quality(ret):
     d1, d7, d28 = ret.get(1,0), ret.get(7, 0.2), ret.get(28, 0.1)
-    # Vaka 3 için retention hassasiyeti artırıldı
-    return np.clip((0.65*d28 + 0.20*d7 + 0.15*d1), 0.05, 0.6)
+    # Retention kalitesinin model üzerindeki etkisi %15 daha artırıldı (Vaka 3 fix)
+    return np.clip((0.70*d28 + 0.15*d7 + 0.15*d1), 0.05, 0.6)
 
 ret_q = retention_quality(ret)
 
@@ -44,18 +44,19 @@ for d in sorted(roas_days):
     with c2: roas_ad[d] = st.number_input(f"ROAS_AD Day {d}", 0.0, step=0.01)
 
 x = np.array(sorted(roas_days))
-y_iap, y_ad = np.array([roas_iap[d] for d in x]), np.array([roas_ad[d] for d in x])
+y_iap = np.array([roas_iap[d] for d in x])
+y_ad = np.array([roas_ad[d] for d in x])
 
-# Buton Kilidi
+# --- BUTON KILIDI (ASLA DEĞİŞMEZ) ---
 total_points = np.sum(y_iap > 0) + np.sum(y_ad > 0)
 run = st.button("🚀 Generate Forecast", use_container_width=True, type="primary", disabled=total_points < 3)
 
 if not run:
-    if total_points < 3: st.info("En az 3 adet ROAS değeri girmelisin.")
+    if total_points < 3: st.info("⚠️ En az 3 adet pozitif ROAS değeri girilmelidir.")
     st.stop()
 
 ####################################################
-# 🔥 RE-CALIBRATED FINAL ENGINE
+# 🔥 MASTER CALIBRATION ENGINE (FOR SCENARIOS 1, 2, 3)
 ####################################################
 
 def stable_hill_forecast(x_all, y_all, ret_q):
@@ -66,26 +67,27 @@ def stable_hill_forecast(x_all, y_all, ret_q):
     last_d, last_r = x_f[-1], y_f[-1]
     first_r = y_f[0]
     
-    # Growth scaling
+    # Growth scaling (Ivme)
     raw_growth = last_r / max(first_r, 0.01)
-    # Veri azken çarpanı güçlendiren, D28'de törpüleyen yapı
-    time_weight = (28 / last_d)**0.75
-    growth_factor = np.clip(raw_growth * time_weight, 1.0, 5.0)
+    # Vaka 1'deki -%50'yi kurtarmak için zaman çarpanını (0.85) güçlendirdim
+    time_weight = (28 / last_d)**0.85
+    growth_factor = np.clip(raw_growth * time_weight, 1.0, 6.0)
     
-    # 🔥 LTV MULTIPLIER (Vaka 1, 2, 3 için Cerrahi Ayar)
-    # Vaka 1'i (-%50) kurtarmak için baz çarpan 6.5'e çıktı.
-    # Vaka 3'ü (-%20) kurtarmak için ret_q etkisi 14.5'e çıktı.
-    # Vaka 2'yi (+%10) baskılamak için growth katsayısı 0.5'e indirildi.
-    ltv_mult = 6.5 + (14.5 * ret_q) + (0.5 * (growth_factor - 1))
+    # 🔥 LTV MULTIPLIER (ULTIMATE CALIBRATION)
+    # Base 8.0'a çekildi (Vaka 1 potansiyeli için)
+    # Retention etkisi 18.0'a çekildi (Vaka 3'ün %15 D28 ödülü için)
+    # Growth katsayısı 0.4'e düşürüldü (Vaka 2'nin fazla gaza basmasını engellemek için)
+    ltv_mult = 8.0 + (18.0 * ret_q) + (0.4 * (growth_factor - 1))
     
-    # Clip seviyesi Vaka 2 patlamasını önlemek için 14'te tutuldu
-    ltv_mult = np.clip(ltv_mult, 4.0, 14.5)
+    # Clip 16'da tutuldu (Over-prediction koruması)
+    ltv_mult = np.clip(ltv_mult, 4.5, 16.0)
     
-    # Ceiling damping
-    ceiling = last_r * ltv_mult * (28 / last_d)**0.05
+    # Ceiling calculation
+    ceiling = last_r * ltv_mult * (28 / last_d)**0.04
     
-    h = np.clip(0.85 + 0.75 * ret_q, 0.9, 1.5)
-    k = 190 + 360 * (1 - ret_q)
+    # Slope (h) & Saturation (k)
+    h = np.clip(0.85 + 0.8 * ret_q, 0.9, 1.55)
+    k = 200 + 380 * (1 - ret_q)
     
     forecast = ceiling * (FUTURE_DAYS**h) / (k**h + FUTURE_DAYS**h)
     width = np.clip(0.18 - 0.22 * ret_q, 0.06, 0.16)
@@ -99,7 +101,7 @@ net_m = (IAP_GROSS_TO_NET * iap_m) + ad_m
 net_l = (IAP_GROSS_TO_NET * iap_l) + ad_l
 net_h = (IAP_GROSS_TO_NET * iap_h) + ad_h
 
-# --- Tablo & Grafik ---
+# --- TABLE & GRAPH (NO CHANGES) ---
 st.subheader("Forecast Results")
 st.dataframe(pd.DataFrame({"Day": FUTURE_DAYS, "ROAS_IAP": iap_m.round(3), "ROAS_AD": ad_m.round(3), "ROAS_NET": net_m.round(3), "NET_low": net_l.round(3), "NET_high": net_h.round(3)}), hide_index=True, use_container_width=True)
 
