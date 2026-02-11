@@ -112,8 +112,8 @@ def hill_forecast(x,y,d28,d7):
     h = np.clip(beta,0.65,1.4)
 
     # ⭐ retention controls curve length — NOT ceiling
-    retention_factor = 1 + 3*d28 + 1.5*d7
-    k = 120 * retention_factor
+    retention_factor = 1 + 6*d28 + 3*d7
+    k = 100 * retention_factor
 
     forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
@@ -194,3 +194,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
