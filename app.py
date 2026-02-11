@@ -6,13 +6,14 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Hill Saturation Model · Retention-aware · IAP / AD separated")
+st.caption("Hill Saturation · Retention-aware · IAP / AD separated")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
-# ------------------------
-# Revenue Parameters
-# ------------------------
+########################################
+# Revenue
+########################################
+
 st.subheader("Revenue Parameters")
 
 fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%","85%","Custom"])
@@ -24,36 +25,76 @@ elif fee_option=="85%":
 else:
     IAP_GROSS_TO_NET = st.number_input("Custom IAP_GROSS_TO_NET",0.0,1.0,0.70,0.01)
 
-# ------------------------
-# Retention
-# ------------------------
+########################################
+# Retention (45 & 60 optional)
+########################################
+
 st.subheader("Retention Inputs")
 
-c1,c2,c3 = st.columns(3)
-with c1:
-    d1 = st.number_input("D1 Retention",0.0,1.0,0.40,0.01)
-with c2:
-    d7 = st.number_input("D7 Retention",0.0,1.0,0.20,0.01)
-with c3:
-    d28 = st.number_input("D28 Retention",0.0,1.0,0.10,0.01)
+ret_days_default = [1,7,28]
+ret_days_optional = [45,60]
 
-ret_score = 0.4*d1 + 0.35*d7 + 0.25*d28
+ret_selected = st.multiselect(
+    "Select retention days",
+    ret_days_default + ret_days_optional,
+    default=ret_days_default
+)
 
-# ------------------------
-# ROAS Inputs
-# ------------------------
+ret = {}
+
+cols = st.columns(len(ret_selected))
+
+for i,d in enumerate(sorted(ret_selected)):
+    with cols[i]:
+        ret[d] = st.number_input(f"D{d}",0.0,1.0,0.0,0.01)
+
+def retention_score(ret):
+
+    if len(ret)==0:
+        return 0.15
+
+    score = 0
+
+    weights = {
+        1:0.25,
+        7:0.25,
+        28:0.25,
+        45:0.15,
+        60:0.10
+    }
+
+    for d,val in ret.items():
+        score += weights.get(d,0)*val
+
+    return np.clip(score,0.05,0.6)
+
+ret_score = retention_score(ret)
+
+########################################
+# ROAS INPUTS (45-60 optional)
+########################################
+
 st.subheader("ROAS Inputs")
 
-days = np.array([1,3,7,14,28])
+day_options = [1,3,7,14,28,45,60]
+
+selected_days = st.multiselect(
+    "Select ROAS days",
+    day_options,
+    default=[1,3,7,14,28]
+)
+
+days = np.array(sorted(selected_days))
+
 roas_iap = {}
 roas_ad = {}
 
 for d in days:
     c1,c2 = st.columns(2)
     with c1:
-        roas_iap[d] = st.number_input(f"ROAS_IAP Day {d}",min_value=0.0,step=0.01)
+        roas_iap[d] = st.number_input(f"ROAS_IAP Day {d}",0.0,step=0.01)
     with c2:
-        roas_ad[d] = st.number_input(f"ROAS_AD Day {d}",min_value=0.0,step=0.01)
+        roas_ad[d] = st.number_input(f"ROAS_AD Day {d}",0.0,step=0.01)
 
 y_iap = np.array([roas_iap[d] for d in days])
 y_ad = np.array([roas_ad[d] for d in days])
@@ -69,14 +110,15 @@ run_forecast = st.button(
 
 if positive_points < 3:
     st.info("Enter at least 3 positive ROAS values.")
+
 if not run_forecast:
     st.stop()
 
-# ------------------------
-# Hill Model
-# ------------------------
+########################################
+# STABLE HILL MODEL
+########################################
 
-def hill_forecast(x,y,d28,d7):
+def hill_forecast(x,y,ret_score):
 
     mask = y>0
     x = x[mask]
@@ -85,55 +127,48 @@ def hill_forecast(x,y,d28,d7):
     if len(y)<3:
         return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
 
-    has_28 = 28 in x
-    has_7 = 7 in x
+    last_day = x.max()
+    roas_last = y[x.argmax()]
 
-    if has_28:
-        roas28 = y[x==28][0]
+    # runaway protection if only early data exists
+    if last_day <= 7:
+        ceiling_mult = 2.5 + 3*ret_score
+    elif last_day <= 14:
+        ceiling_mult = 3 + 4*ret_score
     else:
-        roas28 = y[-1]
+        ceiling_mult = 3.5 + 6*ret_score
 
-    if has_7:
-        roas7 = y[x==7][0]
-    else:
-        roas7 = y[0]
+    L = roas_last * ceiling_mult
 
-    growth_ratio = roas28 / max(roas7,0.01)
-
-    # ⭐ CEILING — growth only
-    L = roas28 * (1.9 + 2.2*growth_ratio)
-
-    # ⭐ early-data clamp
-    if not has_28:
-        L = min(L, roas7 * 6)
-
-    # shape
+    # curvature from log slope
     beta = np.polyfit(np.log(x),np.log(y),1)[0]
-    h = np.clip(beta,0.65,1.4)
+    h = np.clip(beta,0.65,1.25)
 
-    # ⭐ retention controls curve length — NOT ceiling
-    retention_factor = 1 + 4*d28 + 2*d7
-    k = 50 * retention_factor
+    # retention strongly controls half-saturation
+    k = 180 - (ret_score*140)
 
     forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
-    width = max(0.06,0.14 - d28*0.35)
+    width = 0.18 - ret_score*0.12
+    width = np.clip(width,0.06,0.18)
 
     low = forecast*(1-width)
     high = forecast*(1+width)
 
     return forecast,low,high
 
-iap_mean,iap_low,iap_high = hill_forecast(days,y_iap,d28,d7)
-ad_mean,ad_low,ad_high = hill_forecast(days,y_ad,d28,d7)
+
+iap_mean,iap_low,iap_high = hill_forecast(days,y_iap,ret_score)
+ad_mean,ad_low,ad_high = hill_forecast(days,y_ad,ret_score)
 
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
-# ------------------------
-# Output Table
-# ------------------------
+########################################
+# TABLE
+########################################
+
 st.subheader("Forecast")
 
 df = pd.DataFrame({
@@ -147,9 +182,10 @@ df = pd.DataFrame({
 
 st.dataframe(df,hide_index=True,use_container_width=True)
 
-# ------------------------
-# Plot
-# ------------------------
+########################################
+# PLOT
+########################################
+
 st.subheader("ROAS Curves")
 
 fig = go.Figure()
@@ -179,12 +215,21 @@ fig.add_trace(go.Scatter(
     name="IAP"
 ))
 
+# observed only >0
 mask_obs = y_iap>0
 fig.add_trace(go.Scatter(
     x=days[mask_obs],
     y=y_iap[mask_obs],
     mode="markers",
     name="Observed IAP"
+))
+
+mask_obs_ad = y_ad>0
+fig.add_trace(go.Scatter(
+    x=days[mask_obs_ad],
+    y=y_ad[mask_obs_ad],
+    mode="markers",
+    name="Observed AD"
 ))
 
 fig.update_layout(
@@ -194,6 +239,3 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
-
-
-
