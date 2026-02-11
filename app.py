@@ -6,12 +6,12 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Deterministic · Retention-aware · IAP / AD separated")
+st.caption("Deterministic · Retention-aware · Damped Growth Model")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
 # -----------------------------
-# Revenue parameters
+# Revenue Parameters
 # -----------------------------
 st.subheader("Revenue Parameters")
 
@@ -31,23 +31,22 @@ else:
     )
 
 # -----------------------------
-# Retention Input
+# Retention Inputs
 # -----------------------------
 st.subheader("Retention Inputs")
 
-col1, col2, col3 = st.columns(3)
-with col1:
+c1, c2, c3 = st.columns(3)
+with c1:
     d1 = st.number_input("D1 Retention", 0.0, 1.0, 0.40, 0.01)
-with col2:
+with c2:
     d7 = st.number_input("D7 Retention", 0.0, 1.0, 0.20, 0.01)
-with col3:
+with c3:
     d28 = st.number_input("D28 Retention", 0.0, 1.0, 0.10, 0.01)
 
 ret_score = 0.4*d1 + 0.35*d7 + 0.25*d28
-growth_boost = 1 + 2.5 * ret_score
 
 # -----------------------------
-# ROAS Input
+# ROAS Inputs
 # -----------------------------
 st.subheader("ROAS Inputs")
 
@@ -63,7 +62,6 @@ for d in days:
         roas_ad[d] = st.number_input(f"ROAS_AD Day {d}", min_value=0.0, step=0.01)
 
 x = np.array(days)
-
 y_iap = np.array([roas_iap[d] for d in days])
 y_ad = np.array([roas_ad[d] for d in days])
 
@@ -71,6 +69,8 @@ positive_points = np.sum(y_iap > 0) + np.sum(y_ad > 0)
 
 run_forecast = st.button(
     "🚀 Generate Forecast",
+    type="primary",
+    use_container_width=True,
     disabled = positive_points < 3
 )
 
@@ -80,8 +80,10 @@ if positive_points < 3:
 if not run_forecast:
     st.stop()
 
-
-def forecast_component(x, y):
+# -----------------------------
+# Core Damped Growth Model
+# -----------------------------
+def damped_growth_forecast(x, y):
 
     mask = y > 0
     x = x[mask]
@@ -90,32 +92,52 @@ def forecast_component(x, y):
     if len(y) < 3:
         return np.zeros(len(FUTURE_DAYS)), np.zeros(len(FUTURE_DAYS)), np.zeros(len(FUTURE_DAYS))
 
-    # log-log slope
-    beta = np.polyfit(np.log(x), np.log(y), 1)[0]
-
     roas28 = y[-1]
 
-    raw = roas28 * (FUTURE_DAYS/28) ** (beta * growth_boost)
+    # incremental growth rate from last 2 points
+    recent_growth = (y[-1] - y[-2]) / (x[-1] - x[-2])
 
-    # soft damping
-    forecast = roas28 + (raw - roas28) * 0.85
+    # base damping strength
+    base_b = 0.8
 
-    width = max(0.05, 0.15 - 0.5*ret_score)
+    # retention-adjusted damping
+    b = base_b / (1 + ret_score*1.5)
 
-    low = forecast * (1 - width)
-    high = forecast * (1 + width)
+    forecasts = []
 
-    return forecast, low, high
+    for t in FUTURE_DAYS:
+        delta_days = t - 28
 
-iap_mean, iap_low, iap_high = forecast_component(x, y_iap)
-ad_mean, ad_low, ad_high = forecast_component(x, y_ad)
+        # damped incremental growth
+        increment = (recent_growth * delta_days) / (1 + b * np.log(t))
+
+        forecast = roas28 + increment
+
+        forecasts.append(max(forecast, roas28))
+
+    forecasts = np.array(forecasts)
+
+    # soft saturation (prevents runaway)
+    saturation_strength = 0.85
+    forecasts = roas28 + (forecasts - roas28) * saturation_strength
+
+    # confidence width
+    width = max(0.05, 0.18 - 0.6*ret_score)
+
+    low = forecasts * (1 - width)
+    high = forecasts * (1 + width)
+
+    return forecasts, low, high
+
+iap_mean, iap_low, iap_high = damped_growth_forecast(x, y_iap)
+ad_mean, ad_low, ad_high = damped_growth_forecast(x, y_ad)
 
 net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
 net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
 # -----------------------------
-# Output table
+# Output Table
 # -----------------------------
 st.subheader("Forecast")
 
@@ -176,4 +198,3 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
