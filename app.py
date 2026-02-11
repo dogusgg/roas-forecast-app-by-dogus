@@ -66,7 +66,7 @@ def retention_quality(ret):
     d7 = ret.get(7, d1*0.5)
     d28 = ret.get(28, d7*0.5)
 
-    # strong weighting → sensitivity artırıldı (Beklentilerine göre ayarlandı)
+    # strong weighting → sensitivity artırıldı
     ret_q = (
         0.55*d28 + 
         0.30*d7 + 
@@ -124,7 +124,7 @@ if not run:
     st.stop()
 
 ####################################################
-# 🔥 STABLE HILL MODEL (BEKLENTİLERİNE GÖRE GÜNCELLENDİ)
+# 🔥 STABLE HILL MODEL
 ####################################################
 
 def stable_hill_forecast(x,y,ret_q):
@@ -140,33 +140,24 @@ def stable_hill_forecast(x,y,ret_q):
     last_d, last_r = x_f[-1], y_f[-1]
     first_r = y_f[0]
 
-    # Vaka 1-2-3 simülasyonu sonucu eklenen ivme çarpanı
+    # growth scaling
     raw_growth = last_r / max(first_r, 0.01)
     time_correction = (28 / last_d)**0.5
     growth_factor = np.clip(raw_growth * time_correction, 1.5, 8.0)
 
-    ####################################################
-    # 🔥 LTV MULTIPLIER (TUNED)
-    ####################################################
-    # Başlangıç ve retention etkisi artırıldı (%70 ve %25 farkları kapatmak için)
+    # 🔥 LTV MULTIPLIER (BEKLENTİLERİNE GÖRE TUNED)
     ltv_mult = 4.2 + 13.0 * ret_q + 2.8 * (growth_factor - 1)
-
-    # HARD GUARDRAILS (Üst sınır genişletildi)
     ltv_mult = np.clip(ltv_mult, 3.5, 25.0)
 
     ceiling = last_r * ltv_mult * (28 / last_d)**0.2
 
-    ####################################################
-    # Shape
-    ####################################################
+    # Shape params
     h = np.clip(0.80 + 0.85 * ret_q, 0.85, 1.6)
     k = 180 + 350 * (1 - ret_q)
 
     forecast = ceiling * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
-    ####################################################
     # Confidence
-    ####################################################
     width = np.clip(0.18 - 0.22*ret_q, 0.06, 0.16)
     low = forecast*(1-width)
     high = forecast*(1+width)
@@ -182,7 +173,7 @@ net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
 ####################################################
-# TABLE (ORİJİNAL FORMAT)
+# TABLE
 ####################################################
 
 st.subheader("Forecast")
@@ -199,7 +190,7 @@ df = pd.DataFrame({
 st.dataframe(df,hide_index=True,use_container_width=True)
 
 ####################################################
-# PLOT (ORİJİNAL FORMAT)
+# PLOT
 ####################################################
 
 st.subheader("ROAS Curves")
@@ -231,7 +222,6 @@ fig.add_trace(go.Scatter(
     name="IAP"
 ))
 
-# Observed only positive
 mask_obs = y_iap>0
 fig.add_trace(go.Scatter(
     x=x[mask_obs],
@@ -246,4 +236,4 @@ fig.update_layout(
     hovermode="x unified"
 )
 
-st.plotly_chart(fig,use
+st.plotly_chart(fig, use_container_width=True)
