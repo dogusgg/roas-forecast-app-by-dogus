@@ -6,4 +6,5 @@ scipy
 pymc
 arviz
 plotly
+scikit-learn
 
