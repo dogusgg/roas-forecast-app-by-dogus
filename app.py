@@ -2,185 +2,142 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from scipy.optimize import curve_fit
 
 st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Hill Saturation Model · Retention-aware · IAP / AD separated")
+st.caption("Retention-driven saturation model · No fake multipliers")
 
 FUTURE_DAYS = np.array([90,120,180,360,720])
 
-# ------------------------
-# Revenue Parameters
-# ------------------------
-st.subheader("Revenue Parameters")
+# -----------------------------
+# RETENTION INPUT
+# -----------------------------
 
-fee_option = st.selectbox("IAP_GROSS_TO_NET", ["70%","85%","Custom"])
-
-if fee_option=="70%":
-    IAP_GROSS_TO_NET = 0.70
-elif fee_option=="85%":
-    IAP_GROSS_TO_NET = 0.85
-else:
-    IAP_GROSS_TO_NET = st.number_input("Custom IAP_GROSS_TO_NET",0.0,1.0,0.70,0.01)
-
-# ------------------------
-# Retention
-# ------------------------
 st.subheader("Retention Inputs")
 
-c1,c2,c3 = st.columns(3)
-with c1:
-    d1 = st.number_input("D1 Retention",0.0,1.0,0.40,0.01)
-with c2:
-    d7 = st.number_input("D7 Retention",0.0,1.0,0.20,0.01)
-with c3:
-    d28 = st.number_input("D28 Retention",0.0,1.0,0.10,0.01)
+d1 = st.number_input("D1 Retention",0.0,1.0,0.40,0.01)
+d7 = st.number_input("D7 Retention",0.0,1.0,0.20,0.01)
+d28 = st.number_input("D28 Retention",0.0,1.0,0.10,0.01)
 
-ret_score = 0.4*d1 + 0.35*d7 + 0.25*d28
+tail = (d7 + 2*d28)/3
 
-# ------------------------
-# ROAS Inputs
-# ------------------------
+# -----------------------------
+# ROAS INPUT
+# -----------------------------
+
 st.subheader("ROAS Inputs")
 
 days = np.array([1,3,7,14,28])
-roas_iap = {}
-roas_ad = {}
+
+roas_iap = []
 
 for d in days:
-    c1,c2 = st.columns(2)
-    with c1:
-        roas_iap[d] = st.number_input(f"ROAS_IAP Day {d}",min_value=0.0,step=0.01)
-    with c2:
-        roas_ad[d] = st.number_input(f"ROAS_AD Day {d}",min_value=0.0,step=0.01)
+    val = st.number_input(f"ROAS_IAP Day {d}",0.0,5.0,0.0,0.01)
+    roas_iap.append(val)
 
-y_iap = np.array([roas_iap[d] for d in days])
-y_ad = np.array([roas_ad[d] for d in days])
+roas_iap = np.array(roas_iap)
 
-positive_points = np.sum(y_iap>0) + np.sum(y_ad>0)
+mask = roas_iap > 0
+x = days[mask]
+y = roas_iap[mask]
 
-run_forecast = st.button(
-    "🚀 Generate Forecast",
-    type="primary",
-    use_container_width=True,
-    disabled = positive_points < 3
-)
-
-if positive_points < 3:
-    st.info("Enter at least 3 positive ROAS values.")
-if not run_forecast:
+if len(y) < 3:
+    st.warning("At least 3 positive ROAS inputs required.")
     st.stop()
 
-# ------------------------
-# Hill Model
-# ------------------------
+run = st.button("🚀 Generate Forecast")
 
-def hill_forecast(x,y,d28):
+if not run:
+    st.stop()
 
-    mask = y>0
-    x = x[mask]
-    y = y[mask]
+# -----------------------------
+# SATURATION MODEL
+# -----------------------------
 
-    if len(y)<3:
-        return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
+def sat_model(t, L, k, beta):
+    return L * (1 - np.exp(-k * (t**beta)))
 
-    roas7 = y[x==7][0] if 7 in x else y[1]
-    roas28 = y[x==28][0] if 28 in x else y[-1]
+roas28 = y[-1]
 
-    growth_ratio = roas28 / max(roas7,0.01)
+# ceiling from retention
+L_guess = roas28 * (1 + 3.5 * tail)
 
-    # ⭐ growth-driven ceiling
-    L_raw = roas28 * (2.5 + 4*growth_ratio)
+beta_guess = 0.6 + 0.8*d28
+k_guess = 0.08
 
-    # ⭐ retention brake
-    retention_brake = 0.35 + d28
-    L = L_raw * retention_brake
+params,_ = curve_fit(
+    sat_model,
+    x,
+    y,
+    bounds=(
+        [roas28*1.1, 0.001, 0.4],
+        [roas28*6, 1, 2]
+    ),
+    p0=[L_guess,k_guess,beta_guess],
+    maxfev=10000
+)
 
-    # shape
-    beta = np.polyfit(np.log(x),np.log(y),1)[0]
-    h = np.clip(beta,0.5,1.4)
+L,k,beta = params
 
-    # half saturation
-    k = 110 + 180*(1-d28)
+future = sat_model(FUTURE_DAYS,L,k,beta)
 
-    forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
+# -----------------------------
+# CONFIDENCE
+# -----------------------------
 
-    width = max(0.07,0.16 - d28*0.4)
+sigma = np.clip(0.25 - 0.15*tail,0.07,0.25)
 
-    low = forecast*(1-width)
-    high = forecast*(1+width)
-
-    return forecast,low,high
-
-iap_mean,iap_low,iap_high = hill_forecast(days,y_iap,d28)
-ad_mean,ad_low,ad_high = hill_forecast(days,y_ad,d28)
-
-net_mean = IAP_GROSS_TO_NET * iap_mean + ad_mean
-net_low = IAP_GROSS_TO_NET * iap_low + ad_low
-net_high = IAP_GROSS_TO_NET * iap_high + ad_high
-
-# ------------------------
-# Output Table
-# ------------------------
-st.subheader("Forecast")
+low = future*(1-sigma)
+high = future*(1+sigma)
 
 df = pd.DataFrame({
     "Day":FUTURE_DAYS,
-    "ROAS_IAP":np.round(iap_mean,3),
-    "ROAS_AD":np.round(ad_mean,3),
-    "ROAS_NET":np.round(net_mean,3),
-    "NET_low":np.round(net_low,3),
-    "NET_high":np.round(net_high,3)
+    "ROAS_IAP":future.round(3),
+    "Low":low.round(3),
+    "High":high.round(3)
 })
+
+st.subheader("Forecast")
 
 st.dataframe(df,hide_index=True,use_container_width=True)
 
-# ------------------------
-# Plot
-# ------------------------
-st.subheader("ROAS Curves")
+# -----------------------------
+# GRAPH
+# -----------------------------
 
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
     x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]),
-    y=np.concatenate([net_high,net_low[::-1]]),
-    fill="toself",
-    fillcolor="rgba(150,150,150,0.25)",
-    line=dict(color="rgba(255,255,255,0)"),
+    y=np.concatenate([high,low[::-1]]),
+    fill='toself',
+    fillcolor='rgba(150,150,150,0.25)',
+    line=dict(color='rgba(255,255,255,0)'),
     name="Confidence"
 ))
 
 fig.add_trace(go.Scatter(
     x=FUTURE_DAYS,
-    y=net_mean,
+    y=future,
     mode="lines",
     line=dict(width=4),
-    name="NET"
+    name="Forecast"
 ))
 
 fig.add_trace(go.Scatter(
-    x=FUTURE_DAYS,
-    y=iap_mean,
-    mode="lines",
-    line=dict(dash="dash"),
-    name="IAP"
-))
-
-mask_obs = y_iap>0
-fig.add_trace(go.Scatter(
-    x=days[mask_obs],
-    y=y_iap[mask_obs],
+    x=x,
+    y=y,
     mode="markers",
-    name="Observed IAP"
+    marker=dict(size=9),
+    name="Observed"
 ))
 
 fig.update_layout(
-    template="plotly_white",
     height=520,
+    template="plotly_white",
     hovermode="x unified"
 )
 
 st.plotly_chart(fig,use_container_width=True)
-
