@@ -61,7 +61,7 @@ for i, d in enumerate(sorted(sel_ret_days)):
 
 # --- C. ROAS (The Trajectory) ---
 st.subheader("3. ROAS Data Points")
-roas_days_options = [1, 3, 7, 14, 28, 45, 60, 90]
+roas_days_options = [1, 3, 7, 14, 28, 45, 60]
 sel_roas_days = st.multiselect("Select Available ROAS Days", roas_days_options, default=[1, 3, 7, 14, 28])
 
 roas_iap, roas_ad = {}, {}
@@ -72,14 +72,14 @@ for d in sorted(sel_roas_days):
     with c1:
         # Defaults for Case 2/3 convenience
         def_iap = 0.0
-        if d == 1: def_iap = 0.02
-        elif d == 3: def_iap = 0.05
-        elif d == 7: def_iap = 0.10
-        elif d == 14: def_iap = 0.16
-        elif d == 28: def_iap = 0.25
-        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 10.0, def_iap, 0.01)
+        if d == 1: def_iap = 0.00
+        elif d == 3: def_iap = 0.00
+        elif d == 7: def_iap = 0.00
+        elif d == 14: def_iap = 0.00
+        elif d == 28: def_iap = 0.00
+        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 1.0, def_iap, 0.01)
     with c2:
-        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 10.0, 0.0, 0.01)
+        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 1.0, 0.0, 0.01)
 
 # Prepare Arrays
 x_days = np.array(sorted(sel_roas_days))
@@ -193,3 +193,4 @@ mask_obs = observed_net > 0
 fig.add_trace(go.Scatter(x=x_days[mask_obs], y=observed_net[mask_obs], mode='markers', marker=dict(color='red', size=12, symbol='circle'), name='Actual Data'))
 fig.update_layout(title="Cumulative Net ROAS Trajectory", xaxis_title="Days Since Install", yaxis_title="ROAS (x)", template="plotly_white", height=500, hovermode="x unified", xaxis=dict(tickmode='array', tickvals=[7, 14, 28, 90, 180, 360, 720]))
 st.plotly_chart(fig, use_container_width=True)
+
