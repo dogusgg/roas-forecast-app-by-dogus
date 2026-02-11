@@ -2,142 +2,129 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from scipy.optimize import curve_fit
 
-st.set_page_config(page_title="ROAS Long-Term Forecast", layout="centered")
+st.set_page_config(page_title="ROAS Forecast",layout="centered")
 
 st.title("📈 ROAS Long-Term Forecast")
-st.caption("Retention-driven saturation model · No fake multipliers")
+st.caption("Retention-weighted Hill model")
 
-FUTURE_DAYS = np.array([90,120,180,360,720])
+FUTURE = np.array([90,120,180,360,720])
 
-# -----------------------------
-# RETENTION INPUT
-# -----------------------------
+# ------------------------
+# RETENTION
+# ------------------------
 
-st.subheader("Retention Inputs")
+st.subheader("Retention")
 
-d1 = st.number_input("D1 Retention",0.0,1.0,0.40,0.01)
-d7 = st.number_input("D7 Retention",0.0,1.0,0.20,0.01)
-d28 = st.number_input("D28 Retention",0.0,1.0,0.10,0.01)
+d1 = st.number_input("D1",0.0,1.0,0.40,0.01)
+d7 = st.number_input("D7",0.0,1.0,0.20,0.01)
+d28 = st.number_input("D28",0.0,1.0,0.10,0.01)
 
-tail = (d7 + 2*d28)/3
+tail = (d7 + 3*d28)/4
 
-# -----------------------------
+# ------------------------
 # ROAS INPUT
-# -----------------------------
-
-st.subheader("ROAS Inputs")
+# ------------------------
 
 days = np.array([1,3,7,14,28])
 
-roas_iap = []
+st.subheader("ROAS IAP")
 
+iap=[]
 for d in days:
-    val = st.number_input(f"ROAS_IAP Day {d}",0.0,5.0,0.0,0.01)
-    roas_iap.append(val)
+    iap.append(st.number_input(f"IAP Day {d}",0.0,5.0,0.0,0.01))
 
-roas_iap = np.array(roas_iap)
+iap=np.array(iap)
 
-mask = roas_iap > 0
-x = days[mask]
-y = roas_iap[mask]
+st.subheader("ROAS AD")
 
-if len(y) < 3:
-    st.warning("At least 3 positive ROAS inputs required.")
-    st.stop()
+ad=[]
+for d in days:
+    ad.append(st.number_input(f"AD Day {d}",0.0,5.0,0.0,0.01))
 
-run = st.button("🚀 Generate Forecast")
+ad=np.array(ad)
+
+run=st.button("🚀 Generate Forecast")
 
 if not run:
     st.stop()
 
-# -----------------------------
-# SATURATION MODEL
-# -----------------------------
+# ------------------------
+# HILL MODEL
+# ------------------------
 
-def sat_model(t, L, k, beta):
-    return L * (1 - np.exp(-k * (t**beta)))
+def hill(t,L,beta,h):
+    return L*(t**beta)/(t**beta + h**beta)
 
-roas28 = y[-1]
+def forecast(roas,curve_type="iap"):
 
-# ceiling from retention
-L_guess = roas28 * (1 + 3.5 * tail)
+    mask=roas>0
+    x=days[mask]
+    y=roas[mask]
 
-beta_guess = 0.6 + 0.8*d28
-k_guess = 0.08
+    if len(y)<3:
+        return np.zeros_like(FUTURE)
 
-params,_ = curve_fit(
-    sat_model,
-    x,
-    y,
-    bounds=(
-        [roas28*1.1, 0.001, 0.4],
-        [roas28*6, 1, 2]
-    ),
-    p0=[L_guess,k_guess,beta_guess],
-    maxfev=10000
-)
+    roas7 = y[min(2,len(y)-1)]
+    roas28 = y[-1]
 
-L,k,beta = params
+    momentum = roas28 / max(roas7,0.01)
 
-future = sat_model(FUTURE_DAYS,L,k,beta)
+    lifetime_mult = 1.8 + 4.5*tail + 0.6*np.log(max(momentum,1.01))
 
-# -----------------------------
-# CONFIDENCE
-# -----------------------------
+    L = roas28 * lifetime_mult
 
-sigma = np.clip(0.25 - 0.15*tail,0.07,0.25)
+    beta = (1.3 if curve_type=="iap" else 1.0) + 1.5*d28
 
-low = future*(1-sigma)
-high = future*(1+sigma)
+    h = 28
 
-df = pd.DataFrame({
-    "Day":FUTURE_DAYS,
-    "ROAS_IAP":future.round(3),
-    "Low":low.round(3),
-    "High":high.round(3)
+    return hill(FUTURE,L,beta,h)
+
+iap_f = forecast(iap,"iap")
+ad_f = forecast(ad,"ad")
+
+net = 0.7*iap_f + ad_f
+
+sigma = np.clip(0.22 - tail*0.12,0.08,0.22)
+
+low = net*(1-sigma)
+high = net*(1+sigma)
+
+df=pd.DataFrame({
+    "Day":FUTURE,
+    "IAP":iap_f.round(3),
+    "AD":ad_f.round(3),
+    "NET":net.round(3),
+    "LOW":low.round(3),
+    "HIGH":high.round(3)
 })
 
 st.subheader("Forecast")
 
 st.dataframe(df,hide_index=True,use_container_width=True)
 
-# -----------------------------
+# ------------------------
 # GRAPH
-# -----------------------------
+# ------------------------
 
-fig = go.Figure()
+fig=go.Figure()
 
 fig.add_trace(go.Scatter(
-    x=np.concatenate([FUTURE_DAYS,FUTURE_DAYS[::-1]]),
+    x=np.concatenate([FUTURE,FUTURE[::-1]]),
     y=np.concatenate([high,low[::-1]]),
     fill='toself',
     fillcolor='rgba(150,150,150,0.25)',
-    line=dict(color='rgba(255,255,255,0)'),
-    name="Confidence"
+    line=dict(color='rgba(255,255,255,0)')
 ))
 
-fig.add_trace(go.Scatter(
-    x=FUTURE_DAYS,
-    y=future,
-    mode="lines",
-    line=dict(width=4),
-    name="Forecast"
-))
+fig.add_trace(go.Scatter(x=FUTURE,y=net,mode="lines",name="NET",line=dict(width=4)))
+fig.add_trace(go.Scatter(x=FUTURE,y=iap_f,mode="lines",name="IAP",line=dict(dash="dash")))
+fig.add_trace(go.Scatter(x=FUTURE,y=ad_f,mode="lines",name="AD",line=dict(dash="dot")))
 
-fig.add_trace(go.Scatter(
-    x=x,
-    y=y,
-    mode="markers",
-    marker=dict(size=9),
-    name="Observed"
-))
+# observed only positive
+mask_iap=iap>0
+fig.add_trace(go.Scatter(x=days[mask_iap],y=iap[mask_iap],mode="markers",name="Observed IAP"))
 
-fig.update_layout(
-    height=520,
-    template="plotly_white",
-    hovermode="x unified"
-)
+fig.update_layout(template="plotly_white",height=520)
 
 st.plotly_chart(fig,use_container_width=True)
