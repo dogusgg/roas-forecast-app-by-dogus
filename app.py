@@ -88,7 +88,6 @@ def hill_forecast(x,y,d28,d7):
     has_28 = 28 in x
     has_7 = 7 in x
 
-    # --- Base anchors ---
     if has_28:
         roas28 = y[x==28][0]
     else:
@@ -101,23 +100,20 @@ def hill_forecast(x,y,d28,d7):
 
     growth_ratio = roas28 / max(roas7,0.01)
 
-    # ⭐ growth-driven ceiling
-    L_raw = roas28 * (2.2 + 3.8*growth_ratio)
+    # ⭐ CEILING — growth only
+    L = roas28 * (1.9 + 2.2*growth_ratio)
 
-    # ⭐ MUCH stronger retention effect
-    retention_power = 1 + 3*d7 + 6*d28
-    L = L_raw * retention_power
-
-    # --- EARLY DATA PROTECTION ---
+    # ⭐ early-data clamp
     if not has_28:
-        L = min(L, roas28 * 4.5)
+        L = min(L, roas7 * 6)
 
     # shape
     beta = np.polyfit(np.log(x),np.log(y),1)[0]
-    h = np.clip(beta,0.6,1.5)
+    h = np.clip(beta,0.65,1.4)
 
-    # half saturation
-    k = 100 + 160*(1-d28)
+    # ⭐ retention controls curve length — NOT ceiling
+    retention_factor = 1 + 3*d28 + 1.5*d7
+    k = 120 * retention_factor
 
     forecast = L * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
@@ -198,3 +194,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig,use_container_width=True)
+
