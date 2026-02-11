@@ -5,21 +5,35 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="ROAS Predictor", layout="centered")
 
-# --- HEADER ---
+# --- HEADER & FIXED CSS ---
 st.title("🎯 ROAS Predictor")
 st.markdown("""
 <style>
-div.stButton > button:first-child {
+/* Sadece aktif (disabled olmayan) butonu kırmızı yap */
+div.stButton > button:first-child:not(:disabled) {
     background-color: #FF4B4B;
     color: white;
     font-size: 20px;
     font-weight: bold;
     border-radius: 10px;
     padding: 15px 0;
+    border: none;
+}
+
+/* Inaktif (disabled) butonu beyaz ve gri çerçeveli yap */
+div.stButton > button:disabled {
+    background-color: white !important;
+    color: #bcbcbc !important;
+    border: 1px solid #bcbcbc !important;
+    font-size: 20px;
+    font-weight: bold;
+    border-radius: 10px;
+    padding: 15px 0;
+    cursor: not-allowed;
 }
 </style>
 """, unsafe_allow_html=True)
-st.caption("Power-Law Time Decay · Retention Elasticity · Precise Calibration")
+st.caption("Power-Law Time Decay · Precise Calibration · Fixed UI State")
 
 FUTURE_DAYS = np.array([90, 120, 180, 360, 720])
 
@@ -67,26 +81,26 @@ x_days = np.array(sorted(sel_roas_days))
 y_iap = np.array([roas_iap[d] for d in x_days])
 y_ad = np.array([roas_ad[d] for d in x_days])
 
-# --- 🔥 FIX: BUTON AKTİVASYON MANTIĞI ---
-# IAP veya AD serilerinden en az birinin 3+ noktası olmalı
+# --- BUTON AKTİVASYON MANTIĞI ---
 iap_point_count = np.sum(y_iap > 0)
 ad_point_count = np.sum(y_ad > 0)
 is_disabled = (iap_point_count < 3) and (ad_point_count < 3)
 
+# Buton oluşturma (CSS'e göre stil değişecek)
+generate = st.button("🚀 RUN FORECAST MODEL", disabled=is_disabled, use_container_width=True)
+
 if is_disabled:
-    st.button("🚀 RUN FORECAST MODEL", disabled=True, use_container_width=True)
-    st.warning("⚠️ Forecast için en az 3 adet ROAS inputu gereklidir.")
+    st.warning("⚠️ Aktivasyon için IAP veya AD serisinden en az birinde 3 adet veri girişi gereklidir.")
     st.stop()
-else:
-    generate = st.button("🚀 RUN FORECAST MODEL", use_container_width=True)
+
+if not generate:
+    st.stop()
 
 # ==========================================
 # 2. CALIBRATED MATHEMATICAL MODEL
 # ==========================================
 
 def calculate_retention_score(ret_dict):
-    # D60 etkisini hissetmek için ağırlıkları genişletiyoruz
-    # Uzun vade (D28, D45, D60) toplam ağırlığın %60'ı
     base_weights = {1: 0.05, 3: 0.05, 7: 0.10, 14: 0.20, 28: 0.25, 45: 0.15, 60: 0.20}
     score, total_w = 0, 0
     for d, val in ret_dict.items():
@@ -101,18 +115,14 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     
     last_day, last_roas = days_array[mask][-1], roas_array[mask][-1]
     
-    # 🔥 720/360 Oranı İçin Hassas h Ayarı
-    # ret_score 0.16 -> h ~ 0.45 (Ratio ~1.10)
-    # ret_score 0.205 -> h ~ 0.85 (Ratio ~1.20)
+    # 720/360 Oranı Kalibrasyonu (0.16 -> ~1.1 | 0.205 -> ~1.2)
     h = 0.45 + (ret_score - 0.16) * 8.8
     k = 450.0 + (ret_score - 0.16) * 1500
     
-    # Base multiplier 
     base_mult = 34.5 * (last_day ** -0.55)
     
     if mode == "ad":
-        # AD forecast %40-50 büyüme hedefi için katsayı
-        base_mult = base_mult * 0.82
+        base_mult = base_mult * 0.82 # AD boost/penalty ayarı
     
     ret_factor = (ret_score / 0.16) ** 1.3
     final_mult = base_mult * ret_factor
@@ -127,7 +137,7 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     return scale * hill(FUTURE_DAYS, k, h)
 
 # ==========================================
-# 3. EXECUTION
+# 3. EXECUTION & VISUALS
 # ==========================================
 
 ret_score = calculate_retention_score(ret_data)
@@ -137,10 +147,6 @@ net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
 
 uncertainty = 0.18 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
 net_low, net_high = net_pred * (1 - uncertainty), net_pred * (1 + uncertainty)
-
-# ==========================================
-# 4. RESULTS
-# ==========================================
 
 st.divider()
 c1, c2, c3 = st.columns(3)
