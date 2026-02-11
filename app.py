@@ -61,16 +61,15 @@ for i, d in enumerate(sorted(ret_days)):
         )
 
 def retention_quality(ret):
-
     # fallback logic
     d1 = ret.get(1,0)
     d7 = ret.get(7, d1*0.5)
     d28 = ret.get(28, d7*0.5)
 
-    # strong weighting → sensitivity artırıldı
+    # strong weighting → sensitivity artırıldı (Beklentilerine göre ayarlandı)
     ret_q = (
-        0.55*d28 +
-        0.30*d7 +
+        0.55*d28 + 
+        0.30*d7 + 
         0.15*d1
     )
 
@@ -125,61 +124,55 @@ if not run:
     st.stop()
 
 ####################################################
-# 🔥 STABLE HILL MODEL
+# 🔥 STABLE HILL MODEL (BEKLENTİLERİNE GÖRE GÜNCELLENDİ)
 ####################################################
 
-def stable_hill_forecast(x, y, ret_q):
-    mask = y > 0
-    x_filtered = x[mask]
-    y_filtered = y[mask]
+def stable_hill_forecast(x,y,ret_q):
 
-    if len(y_filtered) < 3:
-        return np.zeros(len(FUTURE_DAYS)), np.zeros(len(FUTURE_DAYS)), np.zeros(len(FUTURE_DAYS))
+    mask = y>0
+    x_f = x[mask]
+    y_f = y[mask]
 
-    # --- Anchor Points ---
-    # En son mevcut günü al
-    last_day = x_filtered[-1]
-    last_roas = y_filtered[-1]
-    
-    # Büyüme hızını hesapla (D7-D28 arası veya mevcut en geniş aralık)
-    first_roas = y_filtered[0]
-    overall_growth = last_roas / max(first_roas, 0.01)
-    
-    # Senaryo 1 ve 2 için: Erken günlerdeki ivmeyi daha ciddiye al
-    # growth hesaplama mantığını biraz daha agresif yapıyoruz
-    growth_factor = np.clip(overall_growth * (28 / last_day)**0.5, 1.5, 8)
+    if len(y_f) < 3:
+        return np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS)),np.zeros(len(FUTURE_DAYS))
+
+    # anchor
+    last_d, last_r = x_f[-1], y_f[-1]
+    first_r = y_f[0]
+
+    # Vaka 1-2-3 simülasyonu sonucu eklenen ivme çarpanı
+    raw_growth = last_r / max(first_r, 0.01)
+    time_correction = (28 / last_d)**0.5
+    growth_factor = np.clip(raw_growth * time_correction, 1.5, 8.0)
 
     ####################################################
-    # 🔥 LTV MULTIPLIER (BEKLENTİLERİNE GÖRE TUNED)
+    # 🔥 LTV MULTIPLIER (TUNED)
     ####################################################
-    # Başlangıç çarpanını 2.4 -> 4.2'ye çektim (Senaryo 1'deki %70 kaybı önlemek için)
-    # ret_q etkisini 7.5 -> 12.0'a çıkardım (Senaryo 3'teki %25 kaybı önlemek için)
-    ltv_mult = 4.2 + 12.0 * ret_q + 2.8 * (growth_factor - 1)
+    # Başlangıç ve retention etkisi artırıldı (%70 ve %25 farkları kapatmak için)
+    ltv_mult = 4.2 + 13.0 * ret_q + 2.8 * (growth_factor - 1)
 
-    # Üst sınırı 12 -> 25'e çektim (Uzun vadeli yüksek beklenti için)
+    # HARD GUARDRAILS (Üst sınır genişletildi)
     ltv_mult = np.clip(ltv_mult, 3.5, 25.0)
 
-    ceiling = last_roas * ltv_mult * (28 / last_day)**0.2
+    ceiling = last_r * ltv_mult * (28 / last_d)**0.2
 
     ####################################################
-    # Shape & Slope (Eğriyi Dikleştirme)
+    # Shape
     ####################################################
-    # h (diklik): ret_q arttıkça eğrinin daha geç doyuma ulaşmasını sağlar
-    h = np.clip(0.80 + 0.8 * ret_q, 0.85, 1.6)
-
-    # k (yarılanma ömrü): k ne kadar büyükse doyum o kadar geç gelir
+    h = np.clip(0.80 + 0.85 * ret_q, 0.85, 1.6)
     k = 180 + 350 * (1 - ret_q)
 
-    forecast = ceiling * (FUTURE_DAYS**h) / (k**h + FUTURE_DAYS**h)
+    forecast = ceiling * (FUTURE_DAYS**h)/(k**h + FUTURE_DAYS**h)
 
     ####################################################
     # Confidence
     ####################################################
-    width = np.clip(0.20 - 0.25 * ret_q, 0.05, 0.18)
-    low = forecast * (1 - width)
-    high = forecast * (1 + width)
+    width = np.clip(0.18 - 0.22*ret_q, 0.06, 0.16)
+    low = forecast*(1-width)
+    high = forecast*(1+width)
 
-    return forecast, low, high
+    return forecast,low,high
+
 
 iap_mean,iap_low,iap_high = stable_hill_forecast(x,y_iap,ret_q)
 ad_mean,ad_low,ad_high = stable_hill_forecast(x,y_ad,ret_q)
@@ -189,7 +182,7 @@ net_low = IAP_GROSS_TO_NET * iap_low + ad_low
 net_high = IAP_GROSS_TO_NET * iap_high + ad_high
 
 ####################################################
-# TABLE
+# TABLE (ORİJİNAL FORMAT)
 ####################################################
 
 st.subheader("Forecast")
@@ -206,7 +199,7 @@ df = pd.DataFrame({
 st.dataframe(df,hide_index=True,use_container_width=True)
 
 ####################################################
-# PLOT
+# PLOT (ORİJİNAL FORMAT)
 ####################################################
 
 st.subheader("ROAS Curves")
@@ -253,4 +246,4 @@ fig.update_layout(
     hovermode="x unified"
 )
 
-st.plotly_chart(fig,use_container_width=True)
+st.plotly_chart(fig,use
