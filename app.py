@@ -5,11 +5,10 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="ROAS Predictor", layout="centered")
 
-# --- UI & CSS ---
 st.title("🎯 ROAS Predictor")
 st.markdown("""
 <style>
-/* Sadece aktif butonu kırmızı yap */
+
 div.stButton > button:first-child:not(:disabled) {
     background-color: #FF4B4B;
     color: white;
@@ -19,7 +18,7 @@ div.stButton > button:first-child:not(:disabled) {
     padding: 15px 0;
     border: none;
 }
-/* Inaktif butonu beyaz/gri yap */
+
 div.stButton > button:disabled {
     background-color: white !important;
     color: #bcbcbc !important;
@@ -48,7 +47,7 @@ with c2:
     elif fee_mode == "SMB (15%)":
         GROSS_TO_NET = 0.85
     else:
-        GROSS_TO_NET = st.number_input("Custom Net Factor (e.g. 0.70)", 0.0, 1.0, 0.70)
+        GROSS_TO_NET = st.number_input("Custom Net", 0.0, 1.0, 0.70)
 
 st.subheader("2. Retention Metrics")
 
@@ -80,12 +79,11 @@ x_days = np.array(sorted(sel_roas_days))
 y_iap = np.array([roas_iap[d] for d in x_days])
 y_ad = np.array([roas_ad[d] for d in x_days])
 
-# Aktivasyon Mantığı: Herhangi birinde 3 veri varsa çalışır
 is_disabled = (np.sum(y_iap > 0) < 3) and (np.sum(y_ad > 0) < 3)
 generate = st.button("🚀 RUN FORECAST MODEL", disabled=is_disabled, use_container_width=True)
 
 if is_disabled:
-    st.warning("⚠️ Aktivasyon için IAP veya AD serisinden en az birinde 3 adet veri girişi gereklidir.")
+    st.warning("⚠️ Forecast için IAP_ROAS veya AD_ROAS en az birinde 3 adet veri gereklidir.")
     st.stop()
 if not generate: st.stop()
 
@@ -105,19 +103,16 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     last_day = days_array[mask][-1]
     last_roas = roas_array[mask][-1]
     
-    # Base Multiplier (Net Target için 36.5 katsayısı)
     base_mult = 36.5 * (last_day ** -0.55)
     
-    # 🔥 AD Kesintisi: Çarpanın yarısı
     if mode == "ad":
-        base_mult = base_mult * 0.40
+        base_mult = base_mult * 0.33
         
     ret_factor = (ret_score / 0.16) ** 1.1
     final_mult = base_mult * ret_factor
     
-    # 🔥 IAP Kesintisi: %10 down-scale
     if mode == "iap":
-        final_mult = final_mult * 0.80
+        final_mult = final_mult * 0.67
 
     ceiling_roas = last_roas * final_mult
     k, h = 85.0, 1.2
@@ -133,8 +128,6 @@ ad_pred = projected_hill_function(x_days, y_ad, ret_score, mode="ad")
 
 net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
 
-# BANTLAR (Confidence Intervals)
-# D7 verisinde %20 belirsizlik, veri olgunlaştıkça daralıyor
 uncertainty = 0.20 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
 net_low = net_pred * (1 - uncertainty)
 net_high = net_pred * (1 + uncertainty)
@@ -190,6 +183,7 @@ fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marke
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
