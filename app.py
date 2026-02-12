@@ -110,10 +110,10 @@ def anchored_power_law(days_array, roas_array, perf_score, mode="iap"):
     last_roas = roas_array[mask][-1]
     
     # p katsayısı (büyüme hızı) perf_score ile belirlenir
-    p = 0.22 + (perf_score - 1.0) * 0.45
+    p = 0.22 + (perf_score - 1.0) * 0.66
     p = max(0.08, min(0.55, p))
     
-    if mode == "ad": p *= 0.75 # AD doygunluğu daha hızlıdır
+    if mode == "ad": p *= 0.88 # AD doygunluğu daha hızlıdır
     
     # Sıçrama olmaması için projeksiyon son girilen veriden (anchor) başlar
     return last_roas * (FUTURE_DAYS / last_day) ** p
@@ -189,3 +189,4 @@ st.plotly_chart(fig, use_container_width=True)
 # 720/360 Analizi (Alt Bilgi)
 ratio_720_360 = iap_pred[4] / iap_pred[3] if iap_pred[3] > 0 else 0
 st.caption(f"ℹ️ Retention Score: {perf_score:.2f} | Implied 720/360 Ratio: {ratio_720_360:.3f}")
+
