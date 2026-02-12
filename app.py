@@ -137,4 +137,12 @@ df_res = pd.DataFrame({
 st.dataframe(df_res, use_container_width=True, hide_index=True)
 
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=np
+fig.add_trace(go.Scatter(x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]), y=np.concatenate([net_high, net_low[::-1]]), fill='toself', fillcolor='rgba(0, 104, 201, 0.1)', line=dict(color='rgba(255,255,255,0)'), name='Confidence Interval'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Forecast'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP ROAS'))
+
+if np.any(y_iap > 0):
+    fig.add_trace(go.Scatter(x=x_days[y_iap>0], y=(y_iap*GROSS_TO_NET + y_ad)[y_iap>0], mode='markers', marker=dict(color='red', size=10), name='Actual Data'))
+
+fig.update_layout(title="ROAS Trajectory (Aggressive Tuning Enabled)", template="plotly_white", height=500)
+st.plotly_chart(fig, use_container_width=True)
