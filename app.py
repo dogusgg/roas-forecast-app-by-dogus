@@ -67,10 +67,10 @@ roas_iap, roas_ad = {}, {}
 for d in sorted(sel_roas_days):
     c1, c2 = st.columns(2)
     with c1:
-        def_iap = {1: 0.02, 3: 0.05, 7: 0.10, 14: 0.16, 28: 0.25}.get(d, 0.0)
-        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 10.0, def_iap, 0.01)
+        def_iap = {1: 0.00, 3: 0.00, 7: 0.00, 14: 0.00, 28: 0.00}.get(d, 0.0)
+        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 1.0, def_iap, 0.01)
     with c2:
-        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 10.0, 0.0, 0.01)
+        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 1.0, 0.0, 0.01)
 
 x_days = np.array(sorted(sel_roas_days))
 y_iap = np.array([roas_iap[d] for d in x_days])
@@ -182,3 +182,4 @@ if np.any(y_ad > 0):
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
