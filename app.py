@@ -35,7 +35,7 @@ with c2:
 
 st.subheader("2. Retention Metrics")
 ret_days_options = [1, 3, 7, 14, 28, 45, 60]
-sel_ret_days = st.multiselect("Select Available Retention Days", ret_days_options, default=[1, 7, 28])
+sel_ret_days = st.multiselect("Select Available Retention Days", ret_days_options, default=[1, 7, 28, 60])
 
 ret_data = {}
 if sel_ret_days:
@@ -47,15 +47,15 @@ if sel_ret_days:
 
 st.subheader("3. ROAS Data Points")
 roas_days_options = [1, 3, 7, 14, 28, 45, 60]
-sel_roas_days = st.multiselect("Select Available ROAS Days", roas_days_options, default=[1, 3, 7, 14, 28])
+sel_roas_days = st.multiselect("Select Available ROAS Days", roas_days_options, default=[1, 7, 28, 60])
 
 roas_iap, roas_ad = {}, {}
 for d in sorted(sel_roas_days):
     c1, c2 = st.columns(2)
     with c1:
-        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 10.0, {1: 0.02, 3: 0.05, 7: 0.10, 14:0.16, 28:0.25}.get(d, 0.0), 0.01)
+        roas_iap[d] = st.number_input(f"Day {d} IAP ROAS", 0.0, 10.0, {1: 0.02, 7: 0.10, 28:0.25, 60: 0.40}.get(d, 0.0), 0.01)
     with c2:
-        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 10.0, 0.0, 0.01)
+        roas_ad[d] = st.number_input(f"Day {d} AD ROAS", 0.0, 10.0, {1: 0.05, 7: 0.10, 28: 0.15}.get(d, 0.0), 0.01)
 
 x_days = np.array(sorted(sel_roas_days))
 y_iap = np.array([roas_iap[d] for d in x_days])
@@ -64,68 +64,56 @@ y_ad = np.array([roas_ad[d] for d in x_days])
 is_disabled = (np.sum(y_iap > 0) < 3) and (np.sum(y_ad > 0) < 3)
 generate = st.button("🚀 RUN FORECAST MODEL", disabled=is_disabled, use_container_width=True)
 
-if is_disabled:
-    st.warning("⚠️ Aktivasyon için IAP veya AD serisinden en az birinde 3 adet veri girişi gereklidir.")
+if is_disabled or not generate:
+    if is_disabled: st.warning("⚠️ Aktivasyon için IAP veya AD serisinden en az birinde 3 adet veri girişi gereklidir.")
     st.stop()
-if not generate: st.stop()
 
 # ==========================================
-# 2. 🔥 RELATIVE PERFORMANCE MODEL (D60 FIX)
+# 2. 🔥 REFINED POWER-LAW MODEL
 # ==========================================
 
 def calculate_performance_score(ret_dict):
-    if not ret_dict: return 1.0 # Baseline
-    
-    # 1. Baz Değerler (Bu değerler 1.0 performans puanı demektir)
+    if not ret_dict: return 1.0
     baselines = {1: 0.40, 3: 0.28, 7: 0.20, 14: 0.14, 28: 0.10, 45: 0.08, 60: 0.07}
-    
-    # 2. Önem Ağırlıkları (Geç günler daha etkili)
     importance = {1: 1, 3: 2, 7: 5, 14: 8, 28: 15, 45: 18, 60: 25}
-    
-    weighted_perf = 0
-    total_importance = 0
-    
+    weighted_perf, total_importance = 0, 0
     for day, val in ret_dict.items():
         base = baselines.get(day, 0.10)
         imp = importance.get(day, 10)
-        
-        # Günlük performans (Örn: D60 %9 girildiyse -> 0.09 / 0.07 = 1.28)
-        perf_ratio = val / base if base > 0 else 1.0
-        
-        weighted_perf += perf_ratio * imp
+        weighted_perf += (val / base if base > 0 else 1.0) * imp
         total_importance += imp
-    
-    # Normalize edilmiş genel performans skoru (1.0 = baseline, >1.0 = daha iyi)
     return weighted_perf / total_importance
 
 def power_law_projection(days_array, roas_array, perf_score, mode="iap"):
     mask = roas_array > 0
     if np.sum(mask) == 0: return np.zeros(len(FUTURE_DAYS))
     
-    last_day, last_roas = days_array[mask][-1], roas_array[mask][-1]
+    last_day = days_array[mask][-1]
+    last_roas = roas_array[mask][-1]
     
-    # Baz büyüme üssü (p)
-    # p = 0.14 baseline (~1.10 ratio)
-    # perf_score 1.28 olursa p artar ve ratio yükselir
-    p = 0.14 + (perf_score - 1.0) * 0.8
-    p = max(0.05, min(0.40, p)) 
+    # 720/360 oranını belirleyen p (Büyüme hızı)
+    # perf_score 1.0 (baseline) -> p = 0.22 (Ratio ~1.16)
+    # perf_score 1.3 (iyi) -> p = 0.35 (Ratio ~1.27)
+    p_base = 0.22 + (perf_score - 1.0) * 0.45
+    p = max(0.10, min(0.50, p_base)) 
     
-    decay = (FUTURE_DAYS / last_day) ** p
-    if mode == "ad": decay *= 0.6
+    # AD tahmini genellikle daha hızlı doyuma ulaşır (decay)
+    if mode == "ad": p *= 0.7 
     
-    return last_roas * decay
+    # TAHMİN: Son noktadan itibaren pürüzsüz devam eder
+    return last_roas * (FUTURE_DAYS / last_day) ** p
 
 # ==========================================
 # 3. EXECUTION
 # ==========================================
 
 perf_score = calculate_performance_score(ret_data)
-iap_pred = power_law_projection(x_days, y_iap, perf_score, mode="iap")*1.75
-ad_pred = power_law_projection(x_days, y_ad, perf_score, mode="ad")*2.25
+iap_pred = power_law_projection(x_days, y_iap, perf_score, mode="iap")
+ad_pred = power_law_projection(x_days, y_ad, perf_score, mode="ad")
 net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
 
-# Belirsizlik
-uncertainty = 0.12 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
+# Belirsizlik (Giriş verisi ne kadar eskiyse o kadar daralır)
+uncertainty = 0.10 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
 net_low, net_high = net_pred * (1 - uncertainty), net_pred * (1 + uncertainty)
 
 # ==========================================
@@ -141,9 +129,8 @@ with c3:
     last_actual += y_ad[y_ad>0][-1] if np.any(y_ad>0) else 0
     st.metric("Implied LTV Multiplier", f"{(net_pred[3] / last_actual if last_actual > 0 else 0):.1f}x")
 
-# 720/360 oranını göstermek için küçük bir info
 ratio_720_360 = iap_pred[4] / iap_pred[3] if iap_pred[3] > 0 else 0
-st.info(f"📈 720/360 Growth Ratio: **{ratio_720_360:.3f}** (Affected by Retention Score)")
+st.info(f"📈 720/360 Growth Ratio: **{ratio_720_360:.3f}** (Anchor point: Day {x_days[y_iap+y_ad>0][-1]})")
 
 st.dataframe(pd.DataFrame({
     "Day": FUTURE_DAYS, "IAP Forecast": iap_pred.round(3), "Ad Forecast": ad_pred.round(3),
@@ -152,22 +139,9 @@ st.dataframe(pd.DataFrame({
 
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Forecast'))
-fig.add_trace(go.Scatter(x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]), y=np.concatenate([net_high, net_low[::-1]]), fill='toself', fillcolor='rgba(0, 104, 201, 0.1)', line=dict(color='rgba(255,255,255,0)'), name='Confidence Interval'))
-fig.update_layout(title="ROAS Trajectory (Relative Performance Model)", template="plotly_white", height=450)
+# Gözlemlenen verileri de grafiğe ekleyelim ki süreklilik görülsün
+if np.any(y_iap > 0):
+    fig.add_trace(go.Scatter(x=x_days[y_iap>0], y=(y_iap*GROSS_TO_NET + y_ad)[y_iap>0], mode='markers', marker=dict(color='red', size=8), name='Actual Data'))
+
+fig.update_layout(title="ROAS Trajectory (Anchored Power-Law)", template="plotly_white", height=450)
 st.plotly_chart(fig, use_container_width=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
