@@ -94,7 +94,7 @@ if not generate: st.stop()
 def calculate_retention_score(ret_dict):
     if not ret_dict: return 0.16
     
-    importance_map = {1: 2, 3: 3, 7: 4, 14: 3, 28: 4, 45: 3, 60: 4}
+    importance_map = {1: 2, 3: 3, 7: 3, 14: 3, 28: 3, 45: 3, 60: 3}
     
     available_importances = {d: importance_map.get(d, 10) for d in ret_dict.keys()}
     total_importance = sum(available_importances.values())
@@ -123,7 +123,7 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     final_mult = base_mult * ret_factor
     
     if mode == "iap":
-        final_mult = final_mult * 0.5
+        final_mult = final_mult * 0.7
 
     ceiling_roas = last_roas * final_mult
     k, h = 85.0, 1.2
@@ -194,6 +194,7 @@ fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marke
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
