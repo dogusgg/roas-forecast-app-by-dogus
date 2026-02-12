@@ -120,8 +120,8 @@ def power_law_projection(days_array, roas_array, perf_score, mode="iap"):
 # ==========================================
 
 perf_score = calculate_performance_score(ret_data)
-iap_pred = power_law_projection(x_days, y_iap, perf_score, mode="iap")*1.25
-ad_pred = power_law_projection(x_days, y_ad, perf_score, mode="ad")*1.95
+iap_pred = power_law_projection(x_days, y_iap, perf_score, mode="iap")*1.33
+ad_pred = power_law_projection(x_days, y_ad, perf_score, mode="ad")*1.67
 net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
 
 # Belirsizlik
@@ -155,6 +155,7 @@ fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=d
 fig.add_trace(go.Scatter(x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]), y=np.concatenate([net_high, net_low[::-1]]), fill='toself', fillcolor='rgba(0, 104, 201, 0.1)', line=dict(color='rgba(255,255,255,0)'), name='Confidence Interval'))
 fig.update_layout(title="ROAS Trajectory (Relative Performance Model)", template="plotly_white", height=450)
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
