@@ -56,7 +56,7 @@ if sel_ret_days:
     cols = st.columns(len(sel_ret_days))
     for i, d in enumerate(sorted(sel_ret_days)):
         with cols[i]:
-            def_val = {1: 0.40, 7: 0.20, 28: 0.10, 60: 0.07}.get(d, 0.0)
+            def_val = {1: 0.40, 3: 0.28, 7: 0.20, 14: 0.14, 28: 0.10, 45: 0.08, 60: 0.07}.get(d, 0.0)
             ret_data[d] = st.number_input(f"D{d} Ret", 0.0, 1.0, def_val, 0.01)
 
 st.subheader("3. ROAS Data Points")
@@ -182,4 +182,5 @@ if np.any(y_ad > 0):
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
