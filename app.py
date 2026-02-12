@@ -149,10 +149,10 @@ col_res1, col_res2, col_res3 = st.columns(3)
 with col_res1:
     st.metric("D180 Forecast (Net)", f"{net_pred[2]:.2f}x", 
               delta=f"Range: {net_low[2]:.2f}-{net_high[2]:.2f}")
-with col_res1:
+with col_res2:
     st.metric("D360 Forecast (Net)", f"{net_pred[3]:.2f}x", 
               delta=f"Range: {net_low[3]:.2f}-{net_high[3]:.2f}")
-with col_res1:
+with col_res3:
     st.metric("D720 Forecast (Net)", f"{net_pred[4]:.2f}x", 
               delta=f"Range: {net_low[4]:.2f}-{net_high[4]:.2f}")
 
@@ -190,5 +190,6 @@ fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marke
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
 
