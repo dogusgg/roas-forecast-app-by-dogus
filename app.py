@@ -110,14 +110,14 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     
     # 🔥 AD Kesintisi: Çarpanın yarısı
     if mode == "ad":
-        base_mult = base_mult * 0.5
+        base_mult = base_mult * 0.40
         
     ret_factor = (ret_score / 0.16) ** 1.1
     final_mult = base_mult * ret_factor
     
     # 🔥 IAP Kesintisi: %10 down-scale
     if mode == "iap":
-        final_mult = final_mult * 0.90
+        final_mult = final_mult * 0.80
 
     ceiling_roas = last_roas * final_mult
     k, h = 85.0, 1.2
@@ -151,8 +151,6 @@ with col_res1:
               delta=f"Range: {net_low[3]:.2f}-{net_high[3]:.2f}")
 with col_res2:
     st.metric("D180 Forecast (Net)", f"{net_pred[2]:.2f}x")
-with col_res3:
-    st.metric("Implied LTV Multiplier", f"{(net_pred[3] / ((y_iap[-1]*GROSS_TO_NET)+y_ad[-1]) if (y_iap[-1]+y_ad[-1])>0 else 0):.1f}x")
 
 # FULL DATA TABLE
 df_res = pd.DataFrame({
@@ -177,8 +175,8 @@ fig.add_trace(go.Scatter(
     name='Confidence Interval', hoverinfo="skip"
 ))
 
-fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Forecast'))
-fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Blended ROAS Forecast'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP ROAS'))
 fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=ad_pred, mode='lines', line=dict(color='#FFBD45', dash='dot'), name='Ad ROAS'))
 
 # Actual Points
@@ -188,3 +186,4 @@ fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marke
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
