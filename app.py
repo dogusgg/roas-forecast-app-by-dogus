@@ -80,7 +80,7 @@ is_disabled = (np.sum(y_iap > 0) < 3) and (np.sum(y_ad > 0) < 3)
 generate = st.button("🚀 RUN FORECAST MODEL", disabled=is_disabled, use_container_width=True)
 
 if is_disabled or not generate:
-    if is_disabled: st.warning("⚠️ "A minimum of 3 ROAS inputs is required to establish a ROAS growth model.")
+    if is_disabled: st.warning("⚠️ A minimum of 3 ROAS inputs is required to establish a ROAS growth model.")
     st.stop()
 
 # ==========================================
@@ -182,6 +182,7 @@ if np.any(y_ad > 0):
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
