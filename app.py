@@ -106,13 +106,13 @@ def projected_hill_function(days_array, roas_array, ret_score, mode="iap"):
     base_mult = 36.5 * (last_day ** -0.55)
     
     if mode == "ad":
-        base_mult = base_mult * 0.33
+        base_mult = base_mult * 0.4
         
     ret_factor = (ret_score / 0.16) ** 1.1
     final_mult = base_mult * ret_factor
     
     if mode == "iap":
-        final_mult = final_mult * 0.67
+        final_mult = final_mult * 0.7
 
     ceiling_roas = last_roas * final_mult
     k, h = 85.0, 1.2
@@ -183,6 +183,7 @@ fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marke
 
 fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=500, hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
