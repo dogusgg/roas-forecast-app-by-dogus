@@ -122,4 +122,70 @@ def anchored_power_law(days_array, roas_array, perf_score, mode="iap"):
 # 3. EXECUTION
 # ==========================================
 
-perf_score
+perf_score = calculate_performance_score(ret_data)
+iap_pred = anchored_power_law(x_days, y_iap, perf_score, mode="iap")
+ad_pred = anchored_power_law(x_days, y_ad, perf_score, mode="ad")
+
+net_pred = (iap_pred * GROSS_TO_NET) + ad_pred
+
+# Dinamik Belirsizlik Bandı
+uncertainty = 0.15 * (7 / x_days[y_iap+y_ad>0][-1]) ** 0.5
+net_low, net_high = net_pred * (1 - uncertainty), net_pred * (1 + uncertainty)
+
+# ==========================================
+# 4. RESULTS & VISUALIZATION (İlk Kodundaki Düzen)
+# ==========================================
+
+st.divider()
+
+col_res1, col_res2, col_res3 = st.columns(3)
+with col_res1:
+    st.metric("D180 Forecast (Net)", f"{net_pred[2]:.2f}x", 
+              delta=f"Range: {net_low[2]:.2f}-{net_high[2]:.2f}")
+with col_res2:
+    st.metric("D360 Forecast (Net)", f"{net_pred[3]:.2f}x", 
+              delta=f"Range: {net_low[3]:.2f}-{net_high[3]:.2f}")
+with col_res3:
+    st.metric("D720 Forecast (Net)", f"{net_pred[4]:.2f}x", 
+              delta=f"Range: {net_low[4]:.2f}-{net_high[4]:.2f}")
+
+# DATA TABLE
+df_res = pd.DataFrame({
+    "Day": FUTURE_DAYS,
+    "IAP Forecast": iap_pred.round(3),
+    "Ad Forecast": ad_pred.round(3),
+    "NET ROAS": net_pred.round(3),
+    "Conservative": net_low.round(3),
+    "Optimistic": net_high.round(3)
+})
+st.dataframe(df_res, use_container_width=True, hide_index=True)
+
+# CHART
+fig = go.Figure()
+
+# Confidence Tunnel (İlk kodundaki stil)
+fig.add_trace(go.Scatter(
+    x=np.concatenate([FUTURE_DAYS, FUTURE_DAYS[::-1]]),
+    y=np.concatenate([net_high, net_low[::-1]]),
+    fill='toself', fillcolor='rgba(0, 104, 201, 0.15)',
+    line=dict(color='rgba(255,255,255,0)'),
+    name='Confidence Interval', hoverinfo="skip"
+))
+
+# Projeksiyon Çizgileri
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=net_pred, mode='lines+markers', line=dict(color='#0068C9', width=4), name='Net Blended ROAS Forecast'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=iap_pred * GROSS_TO_NET, mode='lines', line=dict(color='#29B09D', dash='dash'), name='Net IAP ROAS'))
+fig.add_trace(go.Scatter(x=FUTURE_DAYS, y=ad_pred, mode='lines', line=dict(color='#FFBD45', dash='dot'), name='Ad ROAS'))
+
+# Gözlemlenen Veriler (Actual Points)
+if np.any(y_iap > 0):
+    fig.add_trace(go.Scatter(x=x_days[y_iap>0], y=y_iap[y_iap>0], mode='markers', marker=dict(color='red', size=10), name='IAP_Observed'))
+if np.any(y_ad > 0):
+    fig.add_trace(go.Scatter(x=x_days[y_ad>0], y=y_ad[y_ad>0], mode='markers', marker=dict(color='blue', size=10), name='AD_Observed'))
+
+fig.update_layout(title="Cumulative Net ROAS Trajectory", template="plotly_white", height=550, hovermode="x unified")
+st.plotly_chart(fig, use_container_width=True)
+
+# 720/360 Analizi (Alt Bilgi)
+ratio_720_360 = iap_pred[4] / iap_pred[3] if iap_pred[3] > 0 else 0
+st.caption(f"ℹ️ Retention Score: {perf_score:.2f} | Implied 720/360 Ratio: {ratio_720_360:.3f}")
